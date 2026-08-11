@@ -677,6 +677,39 @@ textarea:focus-visible {
   color: var(--text);
 }
 
+.nsfw-mode-toggle {
+  min-height: 58px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: var(--text) !important;
+}
+
+.nsfw-mode-toggle input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: #e58b9d;
+}
+
+.nsfw-mode-toggle strong,
+.nsfw-mode-toggle small {
+  display: block;
+}
+
+.nsfw-mode-toggle small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .import-file-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px;

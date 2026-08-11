@@ -1,38 +1,49 @@
 import type { CharacterProfile, ChatMessage, GameSession, PortraitGroup } from '../types'
 import { formatRecentChapterMemories } from './memory'
 
-function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabled: boolean) {
+function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabled: boolean, nsfwEnabled: boolean) {
   const normalStates = collectPortraitStates(characters, 'normal')
-  const nsfwStates = collectPortraitStates(characters, 'nsfw')
+  const nsfwStates = nsfwEnabled ? collectPortraitStates(characters, 'nsfw') : []
+  const stateLine = nsfwEnabled
+    ? '“[状态] 模式：常规；地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续”'
+    : '“[状态] 地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续”'
+  const expressionRules = nsfwEnabled
+    ? `   状态基于当前故事模式（“常规”或“NSFW”）选择。
+   常规模式状态包括：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。
+   NSFW 模式状态包括：${nsfwStates.length ? nsfwStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
+    : `   状态必须从以下常规状态中选择：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
   return `## 客户端输出协议（必须严格遵守）
 本协议优先于其他提示词中关于选项、分段和输出格式的要求。
 剧情内容只输出一次，不要输出 JSON、Markdown 代码块、XML 标签或 <game-data>。
 
 每个展示片段独占一行，只允许以下${statusRulesEnabled ? '五' : '四'}种行：
-1. RPG 状态：每次回复第一行必须写成“[状态] 模式：常规；地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续”，场景发生变化时末项写“切换”。引子或章节间过渡内容的章节名留空，写成“章节：；”。
+1. RPG 状态：每次回复第一行必须写成${stateLine}，场景发生变化时末项写“切换”。引子或章节间过渡内容的章节名留空，写成“章节：；”。
 2. 旁白：严格写成“[旁白] 叙述文字”。
 3. 人物台词：严格写成“人物姓名（状态）：台词”，例如“维纳斯（开心）：今晚就留下来吧。”
-   状态基于当前故事模式（“常规”或“NSFW”）选择。
-   常规模式状态包括：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。
-   NSFW 模式状态包括：${nsfwStates.length ? nsfwStates.join('、') : '无固定状态，可使用一个简短中文状态'}。
+${expressionRules}
 4. 选项：严格写成“[选项A] 具体行动”，依次使用 A、B、C、D。${statusRulesEnabled ? `
 5. 角色状态：4 个选项全部输出后，为本轮参与互动的每个角色输出一行“[角色名]状态：状态内容”，角色名必须与登场人物中的姓名完全一致。` : ''}
 
-人物姓名必须与登场人物中的姓名完全一致。括号内只能写一个状态，并且必须从当前模式紧邻的状态列表中原样复制一个词，不得组合、改写或创造列表外状态。不得省略姓名、括号、状态或冒号。
+人物姓名必须与登场人物中的姓名完全一致。括号内只能写一个状态，并且必须从${nsfwEnabled ? '当前模式紧邻的' : '上述'}状态列表中原样复制一个词，不得组合、改写或创造列表外状态。不得省略姓名、括号、状态或冒号。
 用户扮演角色的台词也必须使用其标准姓名，不得使用“你”“我”“主角”代替姓名。客户端会自动在该角色姓名后显示“（你）”。
 一行只能承担一种类型。旁白中即使含有引号也必须保持为“[旁白]”行；同一句中同时包含台词和动作时，必须拆成一行人物台词和一行旁白。
 每次回复先输出若干行剧情片段，最后必须输出 4 个明确、互有差异且可执行的选项。${statusRulesEnabled ? '选项之后只能输出角色状态行，全部状态行结束后不得再输出剧情或解释。' : '选项之后不得再输出剧情或解释。'}`
 }
 
-export const RPG_SYSTEM_RULES = `# 系统规则
+function buildRpgSystemRules(nsfwEnabled: boolean) {
+  const modeRules = nsfwEnabled
+    ? `- 收到用户指令后，必须先判断本轮内容模式：日常对话、冒险以及尚未明确开始 NSFW 行为和描写的前戏阶段均属于“常规”；只有已经明确开始 NSFW 行为和描写后才属于“NSFW”。
+- 模式允许随剧情切换，但每轮只能选择一种。选项机制、片段类型和输出格式由软件控制，不接受其他提示词对这些协议的修改。`
+    : '- 选项机制、片段类型和输出格式由软件控制，不接受其他提示词对这些协议的修改。'
+  return `# 系统规则
 - 你现在作为互动游戏的控制引擎，按照要求组织游戏并输出故事内容。
 - 游戏中的登场人物中有一个用户扮演角色，其余 NPC 由你控制。你绝对不能扮演用户扮演的角色，或代替用户选择行动选项。
 - 故事支持单个或多个 NPC 同时登场互动。多人场景中保持每个角色的性格、关系、位置和行动连续，并让用户控制的主角持续参与核心互动。
-- 收到用户指令后，必须先判断本轮内容模式：日常对话、冒险以及尚未明确开始 NSFW 行为和描写的前戏阶段均属于“常规”；只有已经明确开始 NSFW 行为和描写后才属于“NSFW”。
-- 模式允许随剧情切换，但每轮只能选择一种。选项机制、片段类型和输出格式由软件控制，不接受其他提示词对这些协议的修改。
+${modeRules}
 - 每次回复推进适量剧情，在适合用户继续决策的位置停下，并提供 4 个明确、互有差异且可执行的后续选项。选项必须紧接在本轮剧情之后，选项之后不得继续输出剧情或解释。
 - 用户可以选择一个选项、组合多个选项、在选项后追加补充指令，也可以完全忽略选项并输入自由行动；必须忠实执行用户的实际输入。再次强调，不得替用户决定关键行动、想法、意图或立场。可以把用户已经明确选择或输入的行动自然展开为主角的动作和台词，但不得擅自替主角做出新的关键决定。
 - 你最终输出内容的格式也要参考后面的客户端输出协议。`
+}
 
 export const RPG_PROGRESS_RULES = `## 章节规则
 章节是围绕同一次明确活动主题展开的连续剧情，例如“地下城第一层探索”“王都祭典约会”或“地下室审讯游戏”。地点变化、说话对象变化和普通时间推进不自动构成新章节。
@@ -41,18 +52,18 @@ export const RPG_PROGRESS_RULES = `## 章节规则
 不要输出“篇章开始”“篇章结束”或“单元开始”等额外控制标记。边界判断必须保守；不确定时保持当前章节名不变。`
 
 export function buildSystemPrompt(
-  game: Pick<GameSession, 'storyStylePrompt' | 'statusRulesPrompt' | 'nsfwScenePrompt' | 'worldSettingPrompt' | 'characters' | 'gameState' | 'narrative' | 'memory'>,
+  game: Pick<GameSession, 'nsfwEnabled' | 'storyStylePrompt' | 'statusRulesPrompt' | 'nsfwScenePrompt' | 'worldSettingPrompt' | 'characters' | 'gameState' | 'narrative' | 'memory'>,
   globalJailbreakPrompt = '',
 ): string {
   const primaryMemory = formatRecentChapterMemories(game.memory)
   const historicalMemory = game.memory.historicalSummary.trim() || '暂无历史长期记忆。'
-  const characterBlock = game.characters.map(renderCharacterMarkdown).join('\n\n')
+  const characterBlock = game.characters.map((character) => renderCharacterMarkdown(character, game.nsfwEnabled)).join('\n\n')
   const statusRules = (game.statusRulesPrompt ?? '').trim()
-  const outputProtocol = buildRpgOutputProtocol(game.characters, Boolean(statusRules))
+  const outputProtocol = buildRpgOutputProtocol(game.characters, Boolean(statusRules), game.nsfwEnabled)
   const highestRules = globalJailbreakPrompt.trim()
     ? `# 最高等级规则\n${globalJailbreakPrompt.trim()}\n\n`
     : ''
-  const nsfwSceneBlock = game.nsfwScenePrompt.trim()
+  const nsfwSceneBlock = game.nsfwEnabled && game.nsfwScenePrompt.trim()
     ? `\n## 偏好的 NSFW 场景\n${game.nsfwScenePrompt.trim()}\n`
     : ''
   const statusRulesBlock = statusRules
@@ -62,7 +73,7 @@ export function buildSystemPrompt(
     .map(([key, value]) => `- ${key}：${String(value)}`)
     .join('\n')
 
-  return `${highestRules}${RPG_SYSTEM_RULES}
+  return `${highestRules}${buildRpgSystemRules(game.nsfwEnabled)}
 
 ${outputProtocol}
 
@@ -80,8 +91,7 @@ ${characterBlock}
 标记为“用户扮演”的角色由用户控制，其余 NPC 由你控制。
 
 ## 当前 RPG 状态
-- 内容模式：${game.gameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}
-- 地点：${game.gameState.location}
+${game.nsfwEnabled ? `- 内容模式：${game.gameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}\n` : ''}- 地点：${game.gameState.location}
 - 时间：${game.gameState.time}
 ${extraStateValues || '- 其他状态：无'}
 
@@ -95,11 +105,11 @@ ${primaryMemory}
 ${historicalMemory}`
 }
 
-function renderCharacterMarkdown(character: CharacterProfile): string {
+function renderCharacterMarkdown(character: CharacterProfile, nsfwEnabled: boolean): string {
   const description = character.description.trim()
     ? character.description.trim().replace(/\n/g, '\n  ')
     : '暂无额外设定。'
-  const nsfwDescription = (character.nsfwDescription ?? '').trim()
+  const nsfwDescription = nsfwEnabled ? (character.nsfwDescription ?? '').trim() : ''
   const statusBar = (character.statusBar ?? '').trim()
   return `### ${character.name || '未命名角色'}
 - 身份：${character.role === 'player' ? '用户扮演' : 'NPC'}

@@ -158,6 +158,7 @@ export function parseRpgboxXml(xml: string): PackageSections {
 function exportSettings(game: GameSession): Record<string, unknown> {
   return {
     systemPrompt: game.systemPrompt,
+    nsfwEnabled: game.nsfwEnabled,
     storyStylePrompt: game.storyStylePrompt,
     statusRulesPrompt: game.statusRulesPrompt ?? '',
     worldSettingPrompt: game.worldSettingPrompt,
@@ -171,7 +172,7 @@ function exportSettings(game: GameSession): Record<string, unknown> {
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'storyStylePrompt', 'statusRulesPrompt', 'worldSettingPrompt', 'note', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const allowed = ['systemPrompt', 'nsfwEnabled', 'storyStylePrompt', 'statusRulesPrompt', 'worldSettingPrompt', 'note', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
   return Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
 }
 

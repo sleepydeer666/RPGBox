@@ -16,7 +16,7 @@ import { cloneGameSession, exportRpgbox, importRpgbox, type RpgExportOptions } f
 import { buildStructureRepairMessages, buildSystemPrompt, takeRecentConversationTurns, toApiMessages } from './lib/prompt'
 import { mergeStructureRepair } from './lib/repair'
 import { appendRollbackSnapshot, createRollbackSnapshot, restoreLastRollback } from './lib/rollback'
-import { applyStatePatch } from './lib/state'
+import { applyRpgStatePatch } from './lib/state'
 import { collectRecentActors, type StageActor, type StageTurn } from './lib/stage'
 import { streamCompletion } from './services/openai'
 import { createInitialProviderState, loadState, saveState } from './storage'
@@ -88,7 +88,7 @@ function App() {
     return [{ segments: parsed.segments, sceneChanged: parsed.sceneChanged }]
   }), [activeGame.characters, activeGame.messages, latestAssistant?.id])
   const currentStageParse = busy ? streamingParsed : latestParsed
-  const displayGameState = applyStatePatch(activeGame.gameState, currentStageParse.gameData?.statePatch)
+  const displayGameState = applyRpgStatePatch(activeGame.gameState, currentStageParse.gameData?.statePatch, activeGame.nsfwEnabled)
   const displayChapterTitle = currentStageParse.chapterTitle !== undefined
     ? currentStageParse.chapterTitle.trim()
     : activeGame.narrative.chapter.title.trim()
@@ -135,10 +135,16 @@ function App() {
     setGameDrawerOpen(false)
   }
 
-  async function createGame(title: string, importFile: string) {
+  async function createGame(title: string, importFile: string, nsfwEnabled: boolean) {
     const blank = createBlankGame(games.length + 1, configuredProvider)
     const imported = importFile ? await importRpgbox(importFile, blank) : blank
-    const game = { ...imported, title: title.trim() || blank.title, updatedAt: Date.now() }
+    const game = {
+      ...imported,
+      title: title.trim() || blank.title,
+      nsfwEnabled,
+      gameState: nsfwEnabled ? imported.gameState : { ...imported.gameState, contentMode: 'normal' as const },
+      updatedAt: Date.now(),
+    }
     setGames((current) => [...current, game])
     setActiveGameId(game.id)
     const latest = [...game.messages].reverse().find((message) => message.role === 'assistant')
@@ -184,8 +190,15 @@ function App() {
     return exportRpgbox(game, options)
   }
 
-  function updateRpgMetadata(gameId: string, title: string, note: string) {
-    updateGame(gameId, (game) => ({ ...game, title: title.trim() || '未命名RPG', note: note.trim(), updatedAt: Date.now() }))
+  function updateRpgMetadata(gameId: string, title: string, note: string, nsfwEnabled: boolean) {
+    updateGame(gameId, (game) => ({
+      ...game,
+      title: title.trim() || '未命名RPG',
+      note: note.trim(),
+      nsfwEnabled,
+      gameState: nsfwEnabled ? game.gameState : { ...game.gameState, contentMode: 'normal' },
+      updatedAt: Date.now(),
+    }))
   }
 
   function advanceSegment() {
@@ -399,7 +412,7 @@ function App() {
       updateGame(gameId, (game) => ({
         ...game,
         messages: completeMessages,
-        gameState: applyStatePatch(game.gameState, parsed.gameData?.statePatch),
+        gameState: applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled),
         characters: statusUpdates.size
           ? game.characters.map((character) => statusUpdates.has(character.id)
             ? { ...character, statusBar: statusUpdates.get(character.id) }
@@ -482,7 +495,7 @@ function App() {
           <div className="stage-context" aria-label="当前剧情状态">
             <span className="stage-context-item location"><MapPin size={14} /><strong>{displayGameState.location}</strong></span>
             <span className="stage-context-item"><Clock3 size={14} /><span>{displayGameState.time}</span></span>
-            <span className={`content-mode ${displayGameState.contentMode}`}>{displayGameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}</span>
+            {activeGame.nsfwEnabled && <span className={`content-mode ${displayGameState.contentMode}`}>{displayGameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}</span>}
           </div>
           {choicesVisible ? (
             <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} mode={displayGameState.contentMode} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} />

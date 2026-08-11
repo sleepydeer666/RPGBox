@@ -125,6 +125,7 @@ export interface GameSession {
   id: string
   title: string
   note: string
+  nsfwEnabled: boolean
   systemPrompt: string
   aiSettings: GameAiSettings
   storyStylePrompt: string

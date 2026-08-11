@@ -5,6 +5,7 @@ import type { ChatMessage } from '../types'
 describe('buildSystemPrompt', () => {
   it('appends the lightweight client-owned output protocol', () => {
     const prompt = buildSystemPrompt({
+      nsfwEnabled: true,
       storyStylePrompt: '细腻文风',
       statusRulesPrompt: '记录服装和情绪，只保留当前状态。',
       nsfwScenePrompt: '成人场景偏好',
@@ -48,6 +49,7 @@ describe('buildSystemPrompt', () => {
 
   it('renders characters and flattened portrait tags as markdown choices', () => {
     const prompt = buildSystemPrompt({
+      nsfwEnabled: true,
       storyStylePrompt: '', statusRulesPrompt: '', nsfwScenePrompt: '', worldSettingPrompt: '',
       characters: [{
         id: 'venus', role: 'npc', name: '维纳斯', gender: '女', description: '沉着冷静', nsfwDescription: '对触碰十分敏感', statusBar: '衣着：整齐', color: '#ffffff',
@@ -85,6 +87,37 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('## 状态栏规则')
     expect(prompt).not.toContain('[角色名]状态：状态内容')
     expect(prompt).not.toContain('❤')
+  })
+
+  it('removes all NSFW-specific protocol, settings, character data and portrait states when disabled', () => {
+    const prompt = buildSystemPrompt({
+      nsfwEnabled: false,
+      storyStylePrompt: '',
+      statusRulesPrompt: '',
+      nsfwScenePrompt: '不应出现的场景偏好',
+      worldSettingPrompt: '',
+      characters: [{
+        id: 'venus', role: 'npc', name: '维纳斯', gender: '女', description: '基础设定',
+        nsfwDescription: '不应出现的人物设定', statusBar: '', color: '#ffffff',
+        defaultPortraitIds: { normal: 'normal', nsfw: 'nsfw' },
+        portraits: [
+          { id: 'normal', expression: '开心', tags: ['开心'], groups: ['normal'], uri: 'normal.png' },
+          { id: 'nsfw', expression: '特殊状态', tags: ['特殊状态'], groups: ['nsfw'], uri: 'nsfw.png' },
+        ],
+      }],
+      gameState: { location: '旅店', time: '夜晚', contentMode: 'nsfw', values: {} },
+      narrative: { chapter: { id: 'c', title: '', startedAtMessageId: 'a' } },
+      memory: { historicalSummary: '' },
+    })
+
+    expect(prompt).not.toContain('NSFW')
+    expect(prompt).not.toContain('不应出现的场景偏好')
+    expect(prompt).not.toContain('不应出现的人物设定')
+    expect(prompt).not.toContain('特殊状态')
+    expect(prompt).not.toContain('内容模式')
+    expect(prompt).not.toContain('模式允许随剧情切换')
+    expect(prompt).toContain('[状态] 地点：地点名称')
+    expect(prompt).toContain('状态必须从以下常规状态中选择：开心。')
   })
 })
 

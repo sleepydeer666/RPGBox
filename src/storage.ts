@@ -47,6 +47,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
         id: gameId,
         title: '雨夜来客',
         note: '',
+        nsfwEnabled: true,
         systemPrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         aiSettings: createDefaultAiSettings(fallbackProvider),
         storyStylePrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
@@ -81,6 +82,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       return migrateLegacyNpcIds({
       ...legacy,
       note: legacy.note ?? '',
+      nsfwEnabled: typeof legacy.nsfwEnabled === 'boolean' ? legacy.nsfwEnabled : true,
       aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings },
       storyStylePrompt: legacy.storyStylePrompt ?? legacy.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       statusRulesPrompt: legacy.statusRulesPrompt ?? '',

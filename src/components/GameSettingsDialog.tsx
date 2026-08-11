@@ -29,6 +29,8 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
   const selectedCharacter = game.characters.find((character) => character.id === selectedCharacterId) ?? game.characters[0]
+  const visiblePortraits = selectedCharacter?.portraits.filter((portrait) => game.nsfwEnabled
+    || (portrait.groups?.length ? portrait.groups : ['normal']).includes('normal')) ?? []
   const models = useMemo(() => Array.from(new Set([
     ...(selectedProvider?.models?.length ? selectedProvider.models : selectedProvider?.model ? [selectedProvider.model] : []),
     game.aiSettings.model,
@@ -46,6 +48,13 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
 
   function patchGame(patch: Partial<GameSession>) {
     onChange({ ...game, ...patch, updatedAt: Date.now() })
+  }
+
+  function setNsfwEnabled(nsfwEnabled: boolean) {
+    patchGame({
+      nsfwEnabled,
+      gameState: nsfwEnabled ? game.gameState : { ...game.gameState, contentMode: 'normal' },
+    })
   }
 
   function commitNumericSettings(closeAfter = false) {
@@ -205,10 +214,11 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
           </section>}
 
           {tab === 'game' && <section className="game-tab-panel">
+            <div className="form-section"><h3>内容模式</h3><label className="nsfw-mode-toggle"><input type="checkbox" checked={game.nsfwEnabled} onChange={(event) => setNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>关闭后隐藏相关设置与专用立绘，并从系统提示词中移除对应规则；已有数据会继续保留。</small></span></label></div>
             <div className="form-section"><h3>剧情规则与文风</h3><p className="form-section-description">设置剧情组织方式、整体文风、叙事视角、氛围、节奏、篇幅和描写偏好。选项生成与主角控制权由系统规则固定。</p><textarea className="game-prompt-textarea" value={game.storyStylePrompt} onChange={(event) => patchGame({ storyStylePrompt: event.target.value })} placeholder="例如：细腻的第三人称叙事；注重场景氛围、人物神态和情绪变化……" /></div>
             <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /></div>
             <div className="form-section"><h3>故事背景设定</h3><p className="form-section-description">设置世界观、时代、地点、势力、社会规则和故事开始前已经成立的背景事实。</p><textarea className="game-prompt-textarea" value={game.worldSettingPrompt} onChange={(event) => patchGame({ worldSettingPrompt: event.target.value })} placeholder="例如：世界结构、主要地区、阵营关系、特殊规则与故事前提……" /></div>
-            <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；仅书写希望在 NSFW 情节中生效的偏好" /></div>
+            {game.nsfwEnabled && <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；仅书写希望在 NSFW 情节中生效的偏好" /></div>}
           </section>}
 
           {tab === 'characters' && <section className="character-settings-layout">
@@ -222,17 +232,17 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
               <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
               <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
               <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>
-              <label><span className="nsfw-mark">❤</span> NSFW设定<span className="field-description">描述人物NSFW相关的设定，如H经验、XP、特殊敏感带、NSFW场景下特殊反应等</span><textarea className="character-description" value={selectedCharacter.nsfwDescription ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { nsfwDescription: event.target.value })} placeholder="可留空；仅在NSFW内容中使用" /></label>
-              <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{selectedCharacter.portraits.length} 张</span></div><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label></div>
+              {game.nsfwEnabled && <label><span className="nsfw-mark">❤</span> NSFW设定<span className="field-description">描述人物NSFW相关的设定，如H经验、XP、特殊敏感带、NSFW场景下特殊反应等</span><textarea className="character-description" value={selectedCharacter.nsfwDescription ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { nsfwDescription: event.target.value })} placeholder="可留空；仅在NSFW内容中使用" /></label>}
+              <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{visiblePortraits.length} 张</span></div><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label></div>
               {portraitError && <div className="inline-error">{portraitError}</div>}
-              <div className="portrait-settings-list">{selectedCharacter.portraits.map((portrait) => {
+              <div className="portrait-settings-list">{visiblePortraits.map((portrait) => {
                 const tags = portrait.tags?.length ? portrait.tags : [portrait.expression].filter(Boolean)
                 const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
                 const tagDraftKey = `${selectedCharacter.id}:${portrait.id}`
                 const tagDraft = portraitTagDrafts[tagDraftKey] ?? formatPortraitTags(tags)
                 return <div className="portrait-settings-row" key={portrait.id}>
                   <img src={portraitSource(portrait.uri)} alt="" />
-                  <div className="portrait-metadata"><label>表情标签<input value={tagDraft} onChange={(event) => editPortraitTags(selectedCharacter, portrait, event.target.value)} onBlur={(event) => finishPortraitTagEdit(selectedCharacter, portrait, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="严肃，担忧" /></label><div className="portrait-group-options"><label><input type="checkbox" checked={groups.includes('normal')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'normal', event.target.checked)} />常规</label><label><input type="checkbox" checked={groups.includes('nsfw')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'nsfw', event.target.checked)} /><span className="nsfw-mark">❤</span> NSFW</label></div><div className="portrait-default-actions"><button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.normal === portrait.id || (!selectedCharacter.defaultPortraitIds?.normal && selectedCharacter.defaultPortraitId === portrait.id) ? 'active' : ''}`} disabled={!groups.includes('normal')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'normal')}><Star size={14} />常规默认</button><button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.nsfw === portrait.id ? 'active' : ''}`} disabled={!groups.includes('nsfw')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'nsfw')}><Star size={14} /><span className="nsfw-mark">❤</span> NSFW默认</button></div></div>
+                  <div className="portrait-metadata"><label>表情标签<input value={tagDraft} onChange={(event) => editPortraitTags(selectedCharacter, portrait, event.target.value)} onBlur={(event) => finishPortraitTagEdit(selectedCharacter, portrait, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="严肃，担忧" /></label>{game.nsfwEnabled && <div className="portrait-group-options"><label><input type="checkbox" checked={groups.includes('normal')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'normal', event.target.checked)} />常规</label><label><input type="checkbox" checked={groups.includes('nsfw')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'nsfw', event.target.checked)} /><span className="nsfw-mark">❤</span> NSFW</label></div>}<div className="portrait-default-actions"><button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.normal === portrait.id || (!selectedCharacter.defaultPortraitIds?.normal && selectedCharacter.defaultPortraitId === portrait.id) ? 'active' : ''}`} disabled={!groups.includes('normal')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'normal')}><Star size={14} />{game.nsfwEnabled ? '常规默认' : '设为默认'}</button>{game.nsfwEnabled && <button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.nsfw === portrait.id ? 'active' : ''}`} disabled={!groups.includes('nsfw')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'nsfw')}><Star size={14} /><span className="nsfw-mark">❤</span> NSFW默认</button>}</div></div>
                   <button className="danger-icon" onClick={() => void removePortrait(selectedCharacter, portrait.id)} title="删除立绘"><Trash2 size={16} /></button>
                 </div>
               })}</div>

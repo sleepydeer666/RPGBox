@@ -5,7 +5,7 @@ import type { GameSession } from '../types'
 describe('migrateLegacyNpcIds', () => {
   it('replaces lia in the character and structured history while preserving raw debug text', () => {
     const game = {
-      id: 'g', title: 'RPG', note: '', systemPrompt: '', storyStylePrompt: '', nsfwScenePrompt: '', worldSettingPrompt: '',
+      id: 'g', title: 'RPG', note: '', nsfwEnabled: true, systemPrompt: '', storyStylePrompt: '', nsfwScenePrompt: '', worldSettingPrompt: '',
       aiSettings: { providerId: '', model: '', temperature: 1, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: 1, contextTurns: 12 },
       characters: [{ id: 'lia', role: 'npc', name: '维纳斯', gender: '', description: '', color: '#fff', portraits: [] }],
       messages: [{ id: 'a', role: 'assistant', content: '<game-data>{"segments":[{"characterId":"lia"}]}</game-data>', rawContent: 'original lia', createdAt: 1 }],

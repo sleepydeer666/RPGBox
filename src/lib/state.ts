@@ -18,3 +18,8 @@ export function applyStatePatch(current: GameState, patch?: Record<string, unkno
   }
   return next
 }
+
+export function applyRpgStatePatch(current: GameState, patch: Record<string, unknown> | undefined, nsfwEnabled: boolean): GameState {
+  const next = applyStatePatch(current, patch)
+  return nsfwEnabled ? next : { ...next, contentMode: 'normal' }
+}
