@@ -1,0 +1,34 @@
+import { describe, expect, it } from 'vitest'
+import { clampRecentChapterLimit, formatRecentChapterMemories, normalizeMemoryState, partitionRecentChapterMemories } from './memory'
+
+describe('chapter memory model', () => {
+  it('migrates the legacy chapter summary into the current chapter summary', () => {
+    const memory = normalizeMemoryState({ chapterSummary: '旧的当前记忆', historicalSummary: '远期' })
+    expect(memory.currentChapterSummary).toBe('旧的当前记忆')
+    expect(memory.recentChapters).toEqual([])
+    expect(memory.recentChapterLimit).toBe(5)
+  })
+
+  it('formats completed and current chapter memories for the system prompt', () => {
+    const text = formatRecentChapterMemories(normalizeMemoryState({
+      currentChapterSummary: '当前事件',
+      historicalSummary: '',
+      recentChapters: [{ id: 'c1', title: '地下城第一层', summary: '发现机关。', completedAt: 1 }],
+    }))
+    expect(text).toContain('### 地下城第一层\n发现机关。')
+    expect(text).toContain('### 当前章节（进行中）\n当前事件')
+  })
+
+  it('clamps the configurable recent chapter count', () => {
+    expect(clampRecentChapterLimit(undefined)).toBe(5)
+    expect(clampRecentChapterLimit(0)).toBe(1)
+    expect(clampRecentChapterLimit(50)).toBe(20)
+  })
+
+  it('moves only the oldest chapters beyond the configured limit', () => {
+    const chapters = Array.from({ length: 7 }, (_, index) => ({ id: `c${index}`, title: `${index}`, summary: '', completedAt: index }))
+    const partitioned = partitionRecentChapterMemories(chapters, 5)
+    expect(partitioned.overflow.map((chapter) => chapter.id)).toEqual(['c0', 'c1'])
+    expect(partitioned.retained.map((chapter) => chapter.id)).toEqual(['c2', 'c3', 'c4', 'c5', 'c6'])
+  })
+})

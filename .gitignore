@@ -1,34 +1,63 @@
-# Gradle files
-.gradle/
-build/
+# Dependencies and web build
+node_modules/
+dist/
+*.tsbuildinfo
 
-# Local configuration file (sdk path, etc)
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
 local.properties
+keystore.properties
+*.jks
+*.keystore
+google-services.json
 
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
-*.apk
-output-metadata.json
-
-# IntelliJ
-*.iml
+# IDE and operating system files
 .idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
+*.hprof
+captures/
 misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
-*.jks
-*.keystore
+# Android and Capacitor build output
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/
+.externalNativeBuild/
+.cxx/
+output-metadata.json
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/res/xml/config.xml
+*.apk
+*.aab
+*.aar
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
+# Generated JavaScript config
+capacitor.config.js
 
-# Android Profiling
-*.hprof
+# Local application data and exports
+artifacts/
+*.rpgbox
+window-*.xml
+
+# Private development material
+立绘资源/
+参考系统提示词.txt
+scripts/import-current-rpg-portraits.ps1
+
+# Debug screenshots; publish reviewed images under docs/screenshots instead
+rpgbox-*.png
+rpg-*.png
