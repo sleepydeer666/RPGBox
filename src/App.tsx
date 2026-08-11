@@ -190,11 +190,10 @@ function App() {
     return exportRpgbox(game, options)
   }
 
-  function updateRpgMetadata(gameId: string, title: string, note: string, nsfwEnabled: boolean) {
+  function updateRpgMetadata(gameId: string, title: string, nsfwEnabled: boolean) {
     updateGame(gameId, (game) => ({
       ...game,
       title: title.trim() || '未命名RPG',
-      note: note.trim(),
       nsfwEnabled,
       gameState: nsfwEnabled ? game.gameState : { ...game.gameState, contentMode: 'normal' },
       updatedAt: Date.now(),
@@ -362,7 +361,7 @@ function App() {
             signal: controller.signal,
           })
           repairContent = repairResponse
-          const repaired = mergeStructureRepair(fullText, repairResponse)
+          const repaired = mergeStructureRepair(fullText, repairResponse, gameSnapshot.newStoryChoiceCount)
           if (repaired) {
             fullText = repaired
             parsed = parseAssistantResponse(fullText, { characters: gameSnapshot.characters })

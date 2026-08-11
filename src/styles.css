@@ -527,6 +527,33 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.game-list-copy {
+  display: block;
+}
+
+.game-title-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.game-title-line > strong {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.game-nsfw-status {
+  flex: 0 0 auto;
+  color: #e58b9d;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.game-character-summary {
+  margin-top: 5px;
+}
+
 .game-list-item strong,
 .game-list-item small {
   display: block;

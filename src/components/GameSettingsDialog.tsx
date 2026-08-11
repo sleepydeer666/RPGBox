@@ -26,6 +26,7 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
   const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 12))
   const [memoryLimitDraft, setMemoryLimitDraft] = useState(String(game.memory.recentChapterLimit ?? 5))
+  const [newStoryChoiceCountDraft, setNewStoryChoiceCountDraft] = useState(String(game.newStoryChoiceCount ?? 4))
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
   const selectedCharacter = game.characters.find((character) => character.id === selectedCharacterId) ?? game.characters[0]
@@ -43,6 +44,7 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
   useEffect(() => {
     setContextTurnsDraft(String(game.aiSettings.contextTurns ?? 12))
     setMemoryLimitDraft(String(game.memory.recentChapterLimit ?? 5))
+    setNewStoryChoiceCountDraft(String(game.newStoryChoiceCount ?? 4))
     setPortraitTagDrafts({})
   }, [game.id])
 
@@ -66,13 +68,19 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
     const recentChapterLimit = memoryLimitDraft.trim() && Number.isFinite(parsedMemoryLimit)
       ? clampRecentChapterLimit(parsedMemoryLimit)
       : 5
+    const parsedChoiceCount = Number(newStoryChoiceCountDraft)
+    const newStoryChoiceCount = newStoryChoiceCountDraft.trim() && Number.isFinite(parsedChoiceCount)
+      ? Math.min(10, Math.max(4, Math.round(parsedChoiceCount)))
+      : 4
     setContextTurnsDraft(String(contextTurns))
     setMemoryLimitDraft(String(recentChapterLimit))
-    if (contextTurns !== game.aiSettings.contextTurns || recentChapterLimit !== game.memory.recentChapterLimit) {
+    setNewStoryChoiceCountDraft(String(newStoryChoiceCount))
+    if (contextTurns !== game.aiSettings.contextTurns || recentChapterLimit !== game.memory.recentChapterLimit || newStoryChoiceCount !== game.newStoryChoiceCount) {
       onChange({
         ...game,
         aiSettings: { ...game.aiSettings, contextTurns },
         memory: { ...normalizeMemoryState(game.memory), recentChapterLimit },
+        newStoryChoiceCount,
         updatedAt: Date.now(),
       })
     }
@@ -215,7 +223,7 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
 
           {tab === 'game' && <section className="game-tab-panel">
             <div className="form-section"><h3>内容模式</h3><label className="nsfw-mode-toggle"><input type="checkbox" checked={game.nsfwEnabled} onChange={(event) => setNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>关闭后隐藏相关设置与专用立绘，并从系统提示词中移除对应规则；已有数据会继续保留。</small></span></label></div>
-            <div className="form-section"><h3>剧情规则与文风</h3><p className="form-section-description">设置剧情组织方式、整体文风、叙事视角、氛围、节奏、篇幅和描写偏好。选项生成与主角控制权由系统规则固定。</p><textarea className="game-prompt-textarea" value={game.storyStylePrompt} onChange={(event) => patchGame({ storyStylePrompt: event.target.value })} placeholder="例如：细腻的第三人称叙事；注重场景氛围、人物神态和情绪变化……" /></div>
+            <div className="form-section"><h3>剧情规则与文风</h3><p className="form-section-description">设置剧情组织方式、整体文风、叙事视角、氛围、节奏、篇幅和描写偏好。选项生成与主角控制权由系统规则固定。</p><textarea className="game-prompt-textarea" value={game.storyStylePrompt} onChange={(event) => patchGame({ storyStylePrompt: event.target.value })} placeholder="例如：细腻的第三人称叙事；注重场景氛围、人物神态和情绪变化……" /><label>新故事方向选项数<span className="field-description">当前剧情已经完整结束时，新引子提供的全新故事方向数量，范围为 4～10。</span><input type="number" min="4" max="10" step="1" value={newStoryChoiceCountDraft} onChange={(event) => setNewStoryChoiceCountDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label></div>
             <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /></div>
             <div className="form-section"><h3>故事背景设定</h3><p className="form-section-description">设置世界观、时代、地点、势力、社会规则和故事开始前已经成立的背景事实。</p><textarea className="game-prompt-textarea" value={game.worldSettingPrompt} onChange={(event) => patchGame({ worldSettingPrompt: event.target.value })} placeholder="例如：世界结构、主要地区、阵营关系、特殊规则与故事前提……" /></div>
             {game.nsfwEnabled && <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；仅书写希望在 NSFW 情节中生效的偏好" /></div>}

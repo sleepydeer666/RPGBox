@@ -3,6 +3,7 @@ import { DEFAULT_PROVIDER, DEFAULT_SYSTEM_PROMPT } from './config'
 import { createDefaultAiSettings, createDefaultCharacters, createDefaultNarrative, OPENING_MESSAGE } from './game'
 import { migrateLegacyNpcIds } from './lib/migrations'
 import { normalizeMemoryState } from './lib/memory'
+import { normalizeNewStoryChoiceCount } from './lib/prompt'
 import type { ChatMessage, GameSession, GameState, NarrativeProgress, ProviderProfile } from './types'
 
 const KEY = 'rpgbox-state-v1'
@@ -48,6 +49,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
         title: '雨夜来客',
         note: '',
         nsfwEnabled: true,
+        newStoryChoiceCount: 4,
         systemPrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         aiSettings: createDefaultAiSettings(fallbackProvider),
         storyStylePrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
@@ -83,6 +85,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       ...legacy,
       note: legacy.note ?? '',
       nsfwEnabled: typeof legacy.nsfwEnabled === 'boolean' ? legacy.nsfwEnabled : true,
+      newStoryChoiceCount: normalizeNewStoryChoiceCount(legacy.newStoryChoiceCount),
       aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings },
       storyStylePrompt: legacy.storyStylePrompt ?? legacy.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       statusRulesPrompt: legacy.statusRulesPrompt ?? '',

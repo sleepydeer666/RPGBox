@@ -30,6 +30,7 @@ describe('RPG NSFW setting migration', () => {
 
     const loaded = await loadState()
     expect(loaded.games?.[0].nsfwEnabled).toBe(true)
+    expect(loaded.games?.[0].newStoryChoiceCount).toBe(4)
   })
 
   it('preserves an explicitly disabled saved RPG', async () => {
@@ -40,5 +41,16 @@ describe('RPG NSFW setting migration', () => {
 
     const loaded = await loadState()
     expect(loaded.games?.[0].nsfwEnabled).toBe(false)
+  })
+
+  it('normalizes invalid and out-of-range new-story choice counts', async () => {
+    const invalid = { ...createBlankGame(1), id: 'invalid', newStoryChoiceCount: Number.NaN }
+    const tooLarge = { ...createBlankGame(2), id: 'large', newStoryChoiceCount: 99 }
+    preferenceMocks.get.mockResolvedValue({
+      value: JSON.stringify({ games: [invalid, tooLarge], activeGameId: invalid.id }),
+    })
+
+    const loaded = await loadState()
+    expect(loaded.games?.map((game) => game.newStoryChoiceCount)).toEqual([4, 10])
   })
 })

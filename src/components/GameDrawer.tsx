@@ -10,7 +10,7 @@ interface GameDrawerProps {
   onClose: () => void
   onSelect: (id: string) => void
   onCreate: (title: string, importFile: string, nsfwEnabled: boolean) => Promise<void>
-  onUpdateMetadata: (id: string, title: string, note: string, nsfwEnabled: boolean) => void
+  onUpdateMetadata: (id: string, title: string, nsfwEnabled: boolean) => void
   onDelete: (id: string) => Promise<void>
   onClone: (id: string) => Promise<void>
   onExport: (id: string, options: RpgExportOptions) => Promise<string>
@@ -20,7 +20,6 @@ interface GameDrawerProps {
 export default function GameDrawer(props: GameDrawerProps) {
   const [editingId, setEditingId] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
-  const [draftNote, setDraftNote] = useState('')
   const [draftNsfwEnabled, setDraftNsfwEnabled] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createTitle, setCreateTitle] = useState('')
@@ -36,13 +35,12 @@ export default function GameDrawer(props: GameDrawerProps) {
   function startEditing(game: GameSession) {
     setEditingId(game.id)
     setDraftTitle(game.title)
-    setDraftNote(game.note)
     setDraftNsfwEnabled(game.nsfwEnabled)
   }
 
   function saveEditing() {
     if (!editingId) return
-    props.onUpdateMetadata(editingId, draftTitle, draftNote, draftNsfwEnabled)
+    props.onUpdateMetadata(editingId, draftTitle, draftNsfwEnabled)
     setEditingId('')
   }
 
@@ -134,7 +132,6 @@ export default function GameDrawer(props: GameDrawerProps) {
           {props.games.map((game) => editingId === game.id ? (
             <div className="game-list-editor" key={game.id}>
               <label>名称<input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /></label>
-              <label>备注<textarea value={draftNote} onChange={(event) => setDraftNote(event.target.value)} rows={2} placeholder="添加简短备注" /></label>
               <label className="nsfw-mode-toggle"><input type="checkbox" checked={draftNsfwEnabled} onChange={(event) => setDraftNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>关闭时隐藏相关设置和立绘，但保留已有数据</small></span></label>
               <div><button className="text-button" onClick={() => setEditingId('')}>取消</button><button className="primary-button compact" onClick={saveEditing}><Check size={15} />保存</button></div>
             </div>
@@ -142,10 +139,10 @@ export default function GameDrawer(props: GameDrawerProps) {
             <div className={`game-list-item ${game.id === props.activeGameId ? 'active' : ''}`} key={game.id}>
               <button className="game-list-select" onClick={() => props.onSelect(game.id)}>
                 <BookOpen size={18} />
-                <span><strong>{game.title}</strong><small>{game.note || '暂无备注'}</small></span>
+                <span className="game-list-copy"><span className="game-title-line"><strong>{game.title}</strong>{game.nsfwEnabled && <span className="game-nsfw-status">❤ NSFW启用</span>}</span><GameCharacterSummary game={game} /></span>
               </button>
               <div className="game-list-actions">
-                <button onClick={() => startEditing(game)} title="编辑名称和备注" disabled={working}><Pencil size={15} /><span>编辑</span></button>
+                <button onClick={() => startEditing(game)} title="编辑名称和内容模式" disabled={working}><Pencil size={15} /><span>编辑</span></button>
                 <button onClick={() => void cloneGame(game)} title="克隆 RPG" disabled={working}><BookCopy size={15} /><span>克隆</span></button>
                 <button onClick={() => { setExportGame(game); setExportOptions({ settings: true, characters: true, nsfw: game.nsfwEnabled }); setActionError('') }} title="导出 RPGBox 文件" disabled={working}><Download size={15} /><span>导出</span></button>
                 <button className="danger" onClick={() => void deleteGame(game)} title="删除 RPG" disabled={working}><Trash2 size={15} /><span>删除</span></button>
@@ -164,4 +161,12 @@ export default function GameDrawer(props: GameDrawerProps) {
 
 function toMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function GameCharacterSummary({ game }: { game: GameSession }) {
+  const characters = [
+    ...game.characters.filter((character) => character.role === 'player'),
+    ...game.characters.filter((character) => character.role !== 'player'),
+  ]
+  return <small className="game-character-summary"><span>主要人物：</span>{characters.map((character, index) => <span key={character.id}>{index > 0 ? '，' : ''}<span style={{ color: character.color }}>{character.name.trim() || '未命名角色'}{character.role === 'player' ? '（你）' : ''}</span></span>)}</small>
 }

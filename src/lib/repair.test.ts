@@ -15,4 +15,29 @@ describe('mergeStructureRepair', () => {
   it('rejects a repair response with fewer than four choices', () => {
     expect(mergeStructureRepair('正文', 'A. 继续\nB. 等待\nC. 离开')).toBeNull()
   })
+
+  it('keeps all configured new-story choices', () => {
+    const response = [
+      'A. 与维纳斯调查港口',
+      'B. 邀请露娜前往王都',
+      'C. 和两人探索遗迹',
+      'D. 拜访旅店老板',
+      'E. 追踪神秘信使',
+      'F. 参加城中庆典',
+      'G. 暂时留在村庄',
+    ].join('\n')
+    const merged = mergeStructureRepair('新的引子。', response, 7)
+
+    expect(parseAssistantResponse(merged ?? '').choices).toHaveLength(7)
+    expect(merged).toContain('[选项G] 暂时留在村庄')
+  })
+
+  it('accepts four ordinary choices with a larger new-story setting', () => {
+    const response = 'A. 继续\nB. 等待\nC. 询问\nD. 离开'
+    expect(parseAssistantResponse(mergeStructureRepair('正文', response, 7) ?? '').choices).toHaveLength(4)
+  })
+
+  it('rejects an ambiguous choice count', () => {
+    expect(mergeStructureRepair('正文', 'A. 一\nB. 二\nC. 三\nD. 四\nE. 五', 7)).toBeNull()
+  })
 })

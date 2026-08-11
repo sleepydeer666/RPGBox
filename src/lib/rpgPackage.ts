@@ -159,10 +159,10 @@ function exportSettings(game: GameSession): Record<string, unknown> {
   return {
     systemPrompt: game.systemPrompt,
     nsfwEnabled: game.nsfwEnabled,
+    newStoryChoiceCount: game.newStoryChoiceCount,
     storyStylePrompt: game.storyStylePrompt,
     statusRulesPrompt: game.statusRulesPrompt ?? '',
     worldSettingPrompt: game.worldSettingPrompt,
-    note: game.note,
     messages: game.messages,
     gameState: game.gameState,
     narrative: game.narrative,
@@ -172,8 +172,13 @@ function exportSettings(game: GameSession): Record<string, unknown> {
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'nsfwEnabled', 'storyStylePrompt', 'statusRulesPrompt', 'worldSettingPrompt', 'note', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
-  return Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
+  const allowed = ['systemPrompt', 'nsfwEnabled', 'newStoryChoiceCount', 'storyStylePrompt', 'statusRulesPrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const imported = Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
+  if (settings.newStoryChoiceCount !== undefined) {
+    const parsed = Number(settings.newStoryChoiceCount)
+    imported.newStoryChoiceCount = Number.isFinite(parsed) ? Math.min(10, Math.max(4, Math.round(parsed))) : 4
+  }
+  return imported
 }
 
 async function ensureRpgboxDirectory() {

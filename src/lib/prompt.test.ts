@@ -6,6 +6,7 @@ describe('buildSystemPrompt', () => {
   it('appends the lightweight client-owned output protocol', () => {
     const prompt = buildSystemPrompt({
       nsfwEnabled: true,
+      newStoryChoiceCount: 7,
       storyStylePrompt: '细腻文风',
       statusRulesPrompt: '记录服装和情绪，只保留当前状态。',
       nsfwScenePrompt: '成人场景偏好',
@@ -42,6 +43,9 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('单元：深夜会面')
     expect(prompt).not.toContain('单元是围绕')
     expect(prompt).toContain('最后必须输出 4 个')
+    expect(prompt).toContain('此时选项数为 7 个，每个选项要涵盖一名或多名 NPC')
+    expect(prompt).toContain('依次使用 A 至 G')
+    expect(prompt).toContain('普通剧情续写最后必须输出 4 个')
     expect(prompt).not.toContain('2 至 4 个')
     expect(prompt).toContain('不要输出 JSON')
     expect(prompt).not.toContain('"segments"')
@@ -50,6 +54,7 @@ describe('buildSystemPrompt', () => {
   it('renders characters and flattened portrait tags as markdown choices', () => {
     const prompt = buildSystemPrompt({
       nsfwEnabled: true,
+      newStoryChoiceCount: 4,
       storyStylePrompt: '', statusRulesPrompt: '', nsfwScenePrompt: '', worldSettingPrompt: '',
       characters: [{
         id: 'venus', role: 'npc', name: '维纳斯', gender: '女', description: '沉着冷静', nsfwDescription: '对触碰十分敏感', statusBar: '衣着：整齐', color: '#ffffff',
@@ -92,6 +97,7 @@ describe('buildSystemPrompt', () => {
   it('removes all NSFW-specific protocol, settings, character data and portrait states when disabled', () => {
     const prompt = buildSystemPrompt({
       nsfwEnabled: false,
+      newStoryChoiceCount: 4,
       storyStylePrompt: '',
       statusRulesPrompt: '',
       nsfwScenePrompt: '不应出现的场景偏好',
