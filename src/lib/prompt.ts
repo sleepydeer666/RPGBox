@@ -21,13 +21,13 @@ function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabl
 2. 旁白：严格写成“[旁白] 叙述文字”。
 3. 人物台词：严格写成“人物姓名（状态）：台词”，例如“维纳斯（开心）：今晚就留下来吧。”
 ${expressionRules}
-4. 选项：严格写成“[选项A] 具体行动”。普通剧情续写固定输出 4 个选项，依次使用 A、B、C、D；剧情已经结束并开启全新引子时输出 ${newStoryChoiceCount} 个选项，依次使用 A 至 ${String.fromCharCode(64 + newStoryChoiceCount)}。${statusRulesEnabled ? `
+4. 选项：严格写成“[选项A] 具体行动”。普通剧情续写固定输出 4 个选项，依次使用 A、B、C、D；剧情结束不再有明确后续，或用户要求收尾并开启新剧情时，先进行明确转场并开启新的剧情引子，再输出 ${newStoryChoiceCount} 个选项，依次使用 A 至 ${String.fromCharCode(64 + newStoryChoiceCount)}。${statusRulesEnabled ? `
 5. 角色状态：全部选项输出后，为本轮参与互动的每个角色输出一行“[角色名]状态：状态内容”，角色名必须与登场人物中的姓名完全一致。` : ''}
 
 人物姓名必须与登场人物中的姓名完全一致。括号内只能写一个状态，并且必须从${nsfwEnabled ? '当前模式紧邻的' : '上述'}状态列表中原样复制一个词，不得组合、改写或创造列表外状态。不得省略姓名、括号、状态或冒号。
 用户扮演角色的台词也必须使用其标准姓名，不得使用“你”“我”“主角”代替姓名。客户端会自动在该角色姓名后显示“（你）”。
 一行只能承担一种类型。旁白中即使含有引号也必须保持为“[旁白]”行；同一句中同时包含台词和动作时，必须拆成一行人物台词和一行旁白。
-每次回复先输出若干行剧情片段。普通剧情续写最后必须输出 4 个明确、互有差异且可执行的选项；只有一段剧情已经结束、转入全新引子时，才输出 ${newStoryChoiceCount} 个全新故事方向选项。${statusRulesEnabled ? '选项之后只能输出角色状态行，全部状态行结束后不得再输出剧情或解释。' : '选项之后不得再输出剧情或解释。'}`
+每次回复先输出若干行剧情片段。普通剧情续写最后必须输出 4 个明确、互有差异且可执行的选项；剧情结束不再有明确后续，或用户要求收尾并开启新剧情时，才输出 ${newStoryChoiceCount} 个全新故事方向选项。${statusRulesEnabled ? '选项之后只能输出角色状态行，全部状态行结束后不得再输出剧情或解释。' : '选项之后不得再输出剧情或解释。'}`
 }
 
 function buildRpgSystemRules(nsfwEnabled: boolean, newStoryChoiceCount: number) {
@@ -41,7 +41,7 @@ function buildRpgSystemRules(nsfwEnabled: boolean, newStoryChoiceCount: number) 
 - 故事支持单个或多个 NPC 同时登场互动。多人场景中保持每个角色的性格、关系、位置和行动连续，并让用户控制的主角持续参与核心互动。
 ${modeRules}
 - 每次回复推进适量剧情，在适合用户继续决策的位置停下，并提供 4 个明确、互有差异且可执行的后续选项。选项必须紧接在本轮剧情之后，选项之后不得继续输出剧情或解释。
-- 如果一段剧情结束，不再有明确后续，那么你需要在剧情收尾后开启一段新的引子，并生成全新故事发展方向选项。此时选项数为 ${newStoryChoiceCount} 个，每个选项要涵盖一名或多名 NPC。
+- 如果一段剧情结束不再有明确后续，或者用户要求你收尾本段剧情并开启新的剧情，那么你需要在剧情收尾后，进行明确的转场，并开启一段新的剧情引子，同时生成 ${newStoryChoiceCount} 个全新故事发展方向选项。选项内容应该涵盖不同角色和不同场景、故事大方向，让用户有更丰富的游戏体验。
 - 用户可以选择一个选项、组合多个选项、在选项后追加补充指令，也可以完全忽略选项并输入自由行动；必须忠实执行用户的实际输入。再次强调，不得替用户决定关键行动、想法、意图或立场。可以把用户已经明确选择或输入的行动自然展开为主角的动作和台词，但不得擅自替主角做出新的关键决定。
 - 你最终输出内容的格式也要参考后面的客户端输出协议。`
 }
@@ -168,7 +168,7 @@ export function buildStructureRepairMessages(
   return [
     {
       role: 'system' as const,
-      content: `${globalJailbreakPrompt.trim()}\n\n[选项补全任务 - 优先执行]\n根据已经写完的剧情，只补充选项，不得复述、改写或续写剧情。普通剧情续写必须补充 4 个互有差异且可执行的后续选项，依次使用 A、B、C、D。只有原文明确表现为一段剧情已经收尾、并开启了全新引子时，才补充 ${newStoryChoiceCount} 个全新故事方向选项，依次使用 A 至 ${finalChoiceLetter}，且每个选项必须涵盖以下一名或多名 NPC：${npcNames}。只输出选项行，严格使用“[选项A] 具体行动”格式，不得输出 JSON、代码块或解释。`,
+      content: `${globalJailbreakPrompt.trim()}\n\n[选项补全任务 - 优先执行]\n根据已经写完的剧情，只补充选项，不得复述、改写或续写剧情。普通剧情续写必须补充 4 个互有差异且可执行的后续选项，依次使用 A、B、C、D。原文表现为剧情已经收尾、经过明确转场并开启了新剧情引子时，补充 ${newStoryChoiceCount} 个全新故事方向选项，依次使用 A 至 ${finalChoiceLetter}。这些选项应涵盖不同角色（可用 NPC：${npcNames}）、不同场景和不同故事大方向。只输出选项行，严格使用“[选项A] 具体行动”格式，不得输出 JSON、代码块或解释。`,
     },
     { role: 'user' as const, content: story },
   ]
