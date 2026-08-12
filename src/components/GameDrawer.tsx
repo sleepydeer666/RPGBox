@@ -1,5 +1,5 @@
 import { BookCopy, BookOpen, Check, Download, Pencil, Plus, RefreshCw, Settings, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { listRpgboxFiles, RPGBOX_DIRECTORY_LABEL, type RpgExportOptions } from '../lib/rpgPackage'
 import type { GameSession } from '../types'
 
@@ -164,9 +164,23 @@ function toMessage(error: unknown) {
 }
 
 function GameCharacterSummary({ game }: { game: GameSession }) {
+  const viewportRef = useRef<HTMLElement>(null)
+  const contentRef = useRef<HTMLElement>(null)
+  const [scrollDistance, setScrollDistance] = useState(0)
   const characters = [
     ...game.characters.filter((character) => character.role === 'player'),
     ...game.characters.filter((character) => character.role !== 'player'),
   ]
-  return <small className="game-character-summary"><span>主要人物：</span>{characters.map((character, index) => <span key={character.id}>{index > 0 ? '，' : ''}<span style={{ color: character.color }}>{character.name.trim() || '未命名角色'}{character.role === 'player' ? '（你）' : ''}</span></span>)}</small>
+  useEffect(() => {
+    const viewport = viewportRef.current
+    const content = contentRef.current
+    if (!viewport || !content) return
+    const measure = () => setScrollDistance(Math.max(0, content.scrollWidth - viewport.clientWidth))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(viewport)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [game.characters])
+  return <small ref={viewportRef} className={`game-character-summary ${scrollDistance > 0 ? 'is-overflowing' : ''}`} style={{ '--game-summary-distance': `${scrollDistance}px` } as CSSProperties}><span ref={contentRef} className="game-character-summary-track"><span>主要人物：</span>{characters.map((character, index) => <span key={character.id}>{index > 0 ? '，' : ''}<span style={{ color: character.color }}>{character.name.trim() || '未命名角色'}{character.role === 'player' ? '（你）' : ''}</span></span>)}</span></small>
 }

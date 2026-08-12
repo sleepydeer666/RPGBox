@@ -552,6 +552,27 @@ textarea:focus-visible {
 
 .game-character-summary {
   margin-top: 5px;
+  position: relative;
+  display: block;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.game-character-summary-track {
+  display: inline-flex;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.game-character-summary.is-overflowing .game-character-summary-track {
+  animation: game-summary-marquee 14s ease-in-out infinite;
+}
+
+@keyframes game-summary-marquee {
+  0%, 8% { transform: translateX(0); }
+  45%, 55% { transform: translateX(calc(-1 * var(--game-summary-distance))); }
+  92%, 100% { transform: translateX(0); }
 }
 
 .game-list-item strong,
@@ -560,6 +581,10 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.game-list-item .game-character-summary {
+  text-overflow: clip;
 }
 
 .game-list-actions {

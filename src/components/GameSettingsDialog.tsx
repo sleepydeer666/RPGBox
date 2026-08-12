@@ -249,7 +249,7 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
             </div>}
           </section>}
         </div>
-        <div className="modal-footer"><span>{game.title} · 设置仅对本RPG生效</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setPromptPreviewOpen(true)}><Eye size={16} />查看完整提示词</button><button className="primary-button" onClick={closeDialog}>完成</button></div></div>
+        <div className="modal-footer"><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setPromptPreviewOpen(true)}><Eye size={16} />查看完整提示词</button><button className="primary-button" onClick={closeDialog}>完成</button></div></div>
       </section>
       {promptPreviewOpen && <div className="prompt-preview-layer" role="dialog" aria-modal="true" aria-label="完整提示词"><button className="backdrop" onClick={() => setPromptPreviewOpen(false)} aria-label="关闭完整提示词" /><section className="modal prompt-preview-modal"><div className="modal-head"><div><span className="eyebrow">COMPILED SYSTEM PROMPT</span><h2>完整提示词</h2></div><button className="icon-button" onClick={() => setPromptPreviewOpen(false)} title="关闭"><X size={20} /></button></div><pre>{fullSystemPrompt}</pre></section></div>}
       {cropTarget && <PortraitCropDialog file={cropTarget.file} onCancel={() => setCropTarget(null)} onConfirm={(file) => addPortrait(cropTarget.characterId, file)} />}
