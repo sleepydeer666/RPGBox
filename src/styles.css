@@ -954,6 +954,29 @@ textarea:focus-visible {
   padding: 0;
 }
 
+.system-file-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.system-file-picker > span {
+  color: #b5b7b0;
+  font-size: 11px;
+}
+
+.system-file-picker .secondary-button {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-file-picker .text-button {
+  justify-self: end;
+}
+
 .directory-note {
   margin: 0;
   padding: 10px 11px;

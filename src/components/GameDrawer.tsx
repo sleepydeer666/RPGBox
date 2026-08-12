@@ -1,7 +1,7 @@
-import { BookCopy, BookOpen, Check, Download, Info, Pencil, Plus, RefreshCw, Settings, Trash2, X } from 'lucide-react'
+import { BookCopy, BookOpen, Check, Download, FileUp, Info, Pencil, Plus, RefreshCw, Settings, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import packageJson from '../../package.json'
-import { listRpgboxFiles, RPGBOX_DIRECTORY_LABEL, type RpgExportOptions } from '../lib/rpgPackage'
+import { listRpgboxFiles, RPGBOX_DIRECTORY_LABEL, type RpgboxImportSource, type RpgExportOptions } from '../lib/rpgPackage'
 import type { GameSession } from '../types'
 
 const REPOSITORY_URL = 'https://github.com/sleepydeer666/RPGBox'
@@ -12,7 +12,7 @@ interface GameDrawerProps {
   activeGameId: string
   onClose: () => void
   onSelect: (id: string) => void
-  onCreate: (title: string, importFile: string, nsfwEnabled: boolean) => Promise<void>
+  onCreate: (title: string, importSource: RpgboxImportSource | null, nsfwEnabled: boolean) => Promise<void>
   onUpdateMetadata: (id: string, title: string, nsfwEnabled: boolean) => void
   onDelete: (id: string) => Promise<void>
   onClone: (id: string) => Promise<void>
@@ -28,6 +28,7 @@ export default function GameDrawer(props: GameDrawerProps) {
   const [createTitle, setCreateTitle] = useState('')
   const [createNsfwEnabled, setCreateNsfwEnabled] = useState(false)
   const [importFile, setImportFile] = useState('')
+  const [pickedImportFile, setPickedImportFile] = useState<File | null>(null)
   const [importFiles, setImportFiles] = useState<string[]>([])
   const [exportGame, setExportGame] = useState<GameSession | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -61,17 +62,20 @@ export default function GameDrawer(props: GameDrawerProps) {
     setCreateTitle('')
     setCreateNsfwEnabled(false)
     setImportFile('')
+    setPickedImportFile(null)
     setCreateOpen(true)
     void refreshImportFiles()
   }
 
   async function confirmCreate() {
-    const summary = importFile ? `并从 ${importFile} 导入所选内容` : '并建立一个空白 RPG'
+    const importSource = pickedImportFile ?? (importFile || null)
+    const importName = pickedImportFile?.name ?? importFile
+    const summary = importName ? `并从 ${importName} 导入所选内容` : '并建立一个空白 RPG'
     if (!window.confirm(`确认新建 RPG ${summary}？`)) return
     setWorking(true)
     setActionError('')
     try {
-      await props.onCreate(createTitle, importFile, createNsfwEnabled)
+      await props.onCreate(createTitle, importSource, createNsfwEnabled)
       setCreateOpen(false)
     } catch (error) {
       setActionError(toMessage(error))
@@ -160,7 +164,7 @@ export default function GameDrawer(props: GameDrawerProps) {
         </div>
       </aside>
       {props.open && <button className="drawer-backdrop" onClick={props.onClose} aria-label="关闭RPG目录" />}
-      {createOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="新建RPG"><button className="backdrop" onClick={() => !working && setCreateOpen(false)} aria-label="取消新建" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">NEW RPG</span><h2>新建RPG</h2></div><button className="icon-button" onClick={() => setCreateOpen(false)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content"><label>RPG 名称<input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} placeholder={`留空使用“新RPG ${props.games.length + 1}”`} /></label><label className="nsfw-mode-toggle"><input type="checkbox" checked={createNsfwEnabled} onChange={(event) => setCreateNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>新建 RPG 默认关闭，之后可以随时修改</small></span></label><label>导入 RPGBox 文件<div className="import-file-row"><select value={importFile} onChange={(event) => setImportFile(event.target.value)}><option value="">不导入，建立空白 RPG</option>{importFiles.map((file) => <option value={file} key={file}>{file}</option>)}</select><button className="secondary-button" onClick={() => void refreshImportFiles()} title="重新扫描目录"><RefreshCw size={15} /></button></div></label><p className="directory-note">请将 `.rpgbox` 文件放入 <strong>{RPGBOX_DIRECTORY_LABEL}</strong>。导入列表只扫描此目录，不会读取其他位置。</p>{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>{importFiles.length} 个可导入文件</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setCreateOpen(false)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmCreate()} disabled={working}>{working ? '处理中' : '确认新建'}</button></div></div></section></div>}
+      {createOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="新建RPG"><button className="backdrop" onClick={() => !working && setCreateOpen(false)} aria-label="取消新建" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">NEW RPG</span><h2>新建RPG</h2></div><button className="icon-button" onClick={() => setCreateOpen(false)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content"><label>RPG 名称<input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} placeholder={`留空使用“新RPG ${props.games.length + 1}”`} /></label><label className="nsfw-mode-toggle"><input type="checkbox" checked={createNsfwEnabled} onChange={(event) => setCreateNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>新建 RPG 默认关闭，之后可以随时修改</small></span></label><div className="system-file-picker"><span>导入 RPGBox 文件</span><label className="secondary-button"><FileUp size={16} />{pickedImportFile?.name ?? '从手机选择文件'}<input type="file" accept=".rpgbox,application/zip,application/octet-stream" hidden onChange={(event) => { const file = event.target.files?.[0] ?? null; setPickedImportFile(file); if (file) setImportFile(''); event.target.value = '' }} /></label>{pickedImportFile && <button type="button" className="text-button" onClick={() => setPickedImportFile(null)}>取消选择</button>}</div><label>或扫描应用导出目录<div className="import-file-row"><select value={importFile} disabled={Boolean(pickedImportFile)} onChange={(event) => setImportFile(event.target.value)}><option value="">不导入，建立空白 RPG</option>{importFiles.map((file) => <option value={file} key={file}>{file}</option>)}</select><button className="secondary-button" onClick={() => void refreshImportFiles()} title="重新扫描目录"><RefreshCw size={15} /></button></div></label><p className="directory-note">推荐使用“从手机选择文件”，可读取下载目录或文件管理器中的 `.rpgbox`。目录扫描仅显示 RPGBox 自己保存到 <strong>{RPGBOX_DIRECTORY_LABEL}</strong> 的文件。</p>{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>{pickedImportFile ? `已选择 ${pickedImportFile.name}` : `${importFiles.length} 个目录文件`}</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setCreateOpen(false)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmCreate()} disabled={working}>{working ? '处理中' : '确认新建'}</button></div></div></section></div>}
       {exportGame && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="导出RPG"><button className="backdrop" onClick={() => !working && setExportGame(null)} aria-label="取消导出" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT RPGBOX</span><h2>导出“{exportGame.title}”</h2></div><button className="icon-button" onClick={() => setExportGame(null)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content export-option-list"><label><input type="checkbox" checked={exportOptions.settings} onChange={(event) => setExportOptions((current) => ({ ...current, settings: event.target.checked }))} /><span><strong>RPG 设置</strong><small>提示词、剧情记录、状态、章节与记忆，不包含AI配置</small></span></label><label><input type="checkbox" checked={exportOptions.characters} onChange={(event) => setExportOptions((current) => ({ ...current, characters: event.target.checked }))} /><span><strong>角色</strong><small>基础人物资料、颜色、状态栏及常规立绘资源</small></span></label>{exportGame.nsfwEnabled && <label><input type="checkbox" checked={exportOptions.nsfw} onChange={(event) => setExportOptions((current) => ({ ...current, nsfw: event.target.checked }))} /><span><strong><span className="nsfw-mark">❤</span> NSFW 内容</strong><small>偏好的NSFW场景与角色NSFW设定；同时导出角色时包含对应立绘分组</small></span></label>}<p className="directory-note">文件将保存到 <strong>{RPGBOX_DIRECTORY_LABEL}</strong>，扩展名为 `.rpgbox`。AI接口、密钥、模型及参数不会导出。</p>{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>包内包含 rpg.xml 和所选立绘资源</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportGame(null)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmExport()} disabled={working || (!exportOptions.settings && !exportOptions.characters && !exportOptions.nsfw)}>{working ? '导出中' : '确认导出'}</button></div></div></section></div>}
       {aboutOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-labelledby="about-title"><button className="backdrop" onClick={() => setAboutOpen(false)} aria-label="关闭关于" /><section className="modal about-modal"><div className="modal-head"><div><span className="eyebrow">ABOUT RPGBOX</span><h2 id="about-title">关于</h2></div><button className="icon-button" onClick={() => setAboutOpen(false)} title="关闭"><X size={19} /></button></div><div className="about-content"><div><span>当前版本</span><strong>v{packageJson.version}</strong></div><div><span>GitHub 仓库</span><a href={REPOSITORY_URL} target="_blank" rel="noreferrer">{REPOSITORY_URL}</a></div></div><div className="modal-footer"><span>RPGBox</span><button className="primary-button" onClick={() => setAboutOpen(false)}>完成</button></div></section></div>}
     </>

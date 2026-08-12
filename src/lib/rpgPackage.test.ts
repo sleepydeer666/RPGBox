@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankGame } from '../game'
-import { createRpgboxXml, exportRpgbox, parseRpgboxXml } from './rpgPackage'
+import { createRpgboxXml, exportRpgbox, importRpgbox, parseRpgboxXml } from './rpgPackage'
 
 const filesystemMocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -89,5 +89,16 @@ describe('RPGBox XML manifest', () => {
     const zip = await JSZip.loadAsync(write.data, { base64: true })
     const sections = parseRpgboxXml(await zip.file('rpg.xml')!.async('string'))
     expect(sections.nsfw?.characterSettings?.[0].nsfwDescription).toBe('shared-nsfw-setting')
+  })
+
+  it('imports a package selected through the system file picker', async () => {
+    const zip = new JSZip()
+    zip.file('rpg.xml', createRpgboxXml('Selected RPG', { settings: { storyStylePrompt: '直接读取' } }))
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'selected.rpgbox')
+
+    const imported = await importRpgbox(file, createBlankGame(1))
+
+    expect(imported.storyStylePrompt).toBe('直接读取')
+    expect(filesystemMocks.readFile).not.toHaveBeenCalled()
   })
 })

@@ -12,6 +12,8 @@ export interface RpgExportOptions {
   nsfw: boolean
 }
 
+export type RpgboxImportSource = string | File
+
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
   assetPath: string
 }
@@ -78,11 +80,12 @@ export async function exportRpgbox(game: GameSession, options: RpgExportOptions)
   return `${RPGBOX_DIRECTORY_LABEL}/${fileName}`
 }
 
-export async function importRpgbox(fileName: string, baseGame: GameSession): Promise<GameSession> {
+export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession): Promise<GameSession> {
+  const fileName = typeof source === 'string' ? source : source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
-  const file = await Filesystem.readFile({ path: `${RPGBOX_DIRECTORY}/${fileName}`, directory: Directory.Documents })
-  const base64 = typeof file.data === 'string' ? file.data : await blobToBase64(file.data)
-  const zip = await JSZip.loadAsync(base64, { base64: true })
+  const zip = typeof source === 'string'
+    ? await loadFilesystemZip(`${RPGBOX_DIRECTORY}/${fileName}`)
+    : await JSZip.loadAsync(await source.arrayBuffer())
   const xmlFile = zip.file('rpg.xml')
   if (!xmlFile) throw new Error('RPGBox 文件缺少 rpg.xml')
   const sections = parseRpgboxXml(await xmlFile.async('string'))
@@ -116,6 +119,12 @@ export async function importRpgbox(fileName: string, baseGame: GameSession): Pro
   }
 
   return { ...game, id: baseGame.id, title: baseGame.title, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) }
+}
+
+async function loadFilesystemZip(path: string) {
+  const file = await Filesystem.readFile({ path, directory: Directory.Documents })
+  const base64 = typeof file.data === 'string' ? file.data : await blobToBase64(file.data)
+  return JSZip.loadAsync(base64, { base64: true })
 }
 
 export async function cloneGameSession(game: GameSession, id: string, title: string): Promise<GameSession> {

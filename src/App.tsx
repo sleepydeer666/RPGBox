@@ -13,7 +13,7 @@ import { parseAssistantResponse, visibleStory } from './lib/parser'
 import { completeStreamingLines, resolvePlayback } from './lib/playback'
 import { portraitSource } from './lib/portraits'
 import { deletePortraitFile } from './lib/portraits'
-import { cloneGameSession, exportRpgbox, importRpgbox, type RpgExportOptions } from './lib/rpgPackage'
+import { cloneGameSession, exportRpgbox, importRpgbox, type RpgboxImportSource, type RpgExportOptions } from './lib/rpgPackage'
 import { buildStructureRepairMessages, buildSystemPrompt, takeRecentConversationTurns, toApiMessages } from './lib/prompt'
 import { mergeStructureRepair } from './lib/repair'
 import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback } from './lib/rollback'
@@ -170,9 +170,9 @@ function App() {
     setGameDrawerOpen(false)
   }
 
-  async function createGame(title: string, importFile: string, nsfwEnabled: boolean) {
+  async function createGame(title: string, importSource: RpgboxImportSource | null, nsfwEnabled: boolean) {
     const blank = createBlankGame(games.length + 1, configuredProvider)
-    const imported = importFile ? await importRpgbox(importFile, blank) : blank
+    const imported = importSource ? await importRpgbox(importSource, blank) : blank
     const game = {
       ...imported,
       title: title.trim() || blank.title,

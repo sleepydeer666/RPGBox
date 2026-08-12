@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankGame } from '../game'
-import { createRoleXml, parseRoleXml } from './rolePackage'
+import { createRoleXml, importRolePackage, parseRoleXml } from './rolePackage'
 
 const filesystemMocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -52,5 +52,19 @@ describe('RPGBox role package', () => {
     expect(imported.id).toBe('npc-new')
     expect(imported.role).toBe('npc')
     expect(imported.portraits).toHaveLength(1)
+  })
+
+  it('imports a role package selected through the system file picker', async () => {
+    const zip = new JSZip()
+    zip.file('role.xml', createRoleXml({
+      id: 'old-id', role: 'npc', name: '系统文件', gender: '', description: '', color: '#fff', portraits: [],
+    }))
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'selected.role.rpgbox')
+
+    const imported = await importRolePackage(file, 'game-1', 'npc-new')
+
+    expect(imported.name).toBe('系统文件')
+    expect(imported.id).toBe('npc-new')
+    expect(filesystemMocks.readFile).not.toHaveBeenCalled()
   })
 })
