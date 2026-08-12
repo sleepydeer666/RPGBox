@@ -1,15 +1,17 @@
-import { BookOpen, Eye, ImagePlus, Plus, SlidersHorizontal, Star, Trash2, Users, X } from 'lucide-react'
+import { BookOpen, Download, Eye, ImagePlus, Plus, SlidersHorizontal, Star, Trash2, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { deletePortraitFile, portraitSource, savePortraitFile } from '../lib/portraits'
+import { copyPortraitFile, deletePortraitFile, portraitSource, savePortraitFile } from '../lib/portraits'
 import { createNpcId } from '../lib/migrations'
 import { clampRecentChapterLimit, normalizeMemoryState } from '../lib/memory'
 import type { CharacterPortrait, CharacterProfile, GameSession, PortraitGroup, ProviderProfile } from '../types'
 import { formatPortraitTags, parsePortraitTags } from '../lib/portraitTags'
 import { hexToHsv, hsvToHex, normalizeHexColor, type HsvColor } from '../lib/color'
 import PortraitCropDialog from './PortraitCropDialog'
+import { exportRolePackage, importRolePackage, listRolePackageFiles, ROLE_PACKAGE_DIRECTORY_LABEL } from '../lib/rolePackage'
 
 interface Props {
   game: GameSession
+  games: GameSession[]
   providers: ProviderProfile[]
   fullSystemPrompt: string
   onClose: () => void
@@ -18,7 +20,9 @@ interface Props {
 
 type Tab = 'ai' | 'game' | 'characters'
 
-export default function GameSettingsDialog({ game, providers, fullSystemPrompt, onClose, onChange }: Props) {
+type AddCharacterMode = 'new' | 'clone' | 'import'
+
+export default function GameSettingsDialog({ game, games, providers, fullSystemPrompt, onClose, onChange }: Props) {
   const [tab, setTab] = useState<Tab>('ai')
   const [selectedCharacterId, setSelectedCharacterId] = useState(game.characters[0]?.id ?? '')
   const [portraitError, setPortraitError] = useState('')
@@ -27,6 +31,18 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
   const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 12))
   const [memoryLimitDraft, setMemoryLimitDraft] = useState(String(game.memory.recentChapterLimit ?? 5))
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
+  const [addCharacterOpen, setAddCharacterOpen] = useState(false)
+  const [addCharacterMode, setAddCharacterMode] = useState<AddCharacterMode>('new')
+  const [cloneGameId, setCloneGameId] = useState(game.id)
+  const [cloneCharacterId, setCloneCharacterId] = useState('')
+  const [roleFiles, setRoleFiles] = useState<string[]>([])
+  const [roleFile, setRoleFile] = useState('')
+  const [exportCharacter, setExportCharacter] = useState<CharacterProfile | null>(null)
+  const [exportNsfw, setExportNsfw] = useState(false)
+  const [roleWorking, setRoleWorking] = useState(false)
+  const [roleNotice, setRoleNotice] = useState('')
+  const cloneGame = games.find((item) => item.id === cloneGameId) ?? game
+  const cloneCandidates = cloneGame.characters.filter((character) => character.role === 'npc')
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
   const selectedCharacter = game.characters.find((character) => character.id === selectedCharacterId) ?? game.characters[0]
   const visiblePortraits = selectedCharacter?.portraits.filter((portrait) => game.nsfwEnabled
@@ -93,7 +109,7 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
     patchGame({ characters })
   }
 
-  function addNpc() {
+  function createNpc() {
     const id = createNpcId()
     patchGame({ characters: [...game.characters, {
       id,
@@ -107,6 +123,69 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
       portraits: [],
     }] })
     setSelectedCharacterId(id)
+  }
+
+  async function openAddCharacter() {
+    setAddCharacterMode('new')
+    setCloneGameId(game.id)
+    setCloneCharacterId(game.characters.find((character) => character.role === 'npc')?.id ?? '')
+    setRoleFile('')
+    setRoleNotice('')
+    setAddCharacterOpen(true)
+    try {
+      setRoleFiles(await listRolePackageFiles())
+    } catch (error) {
+      setRoleNotice(toMessage(error))
+    }
+  }
+
+  async function confirmAddCharacter() {
+    setRoleWorking(true)
+    setRoleNotice('')
+    try {
+      if (addCharacterMode === 'new') {
+        createNpc()
+      } else if (addCharacterMode === 'clone') {
+        const source = cloneCandidates.find((character) => character.id === cloneCharacterId)
+        if (!source) throw new Error('请选择要克隆的 NPC')
+        const id = createNpcId()
+        const clone = structuredClone(source)
+        clone.id = id
+        clone.role = 'npc'
+        clone.portraits = await Promise.all(clone.portraits.map(async (portrait) => ({
+          ...portrait,
+          uri: await copyPortraitFile(portrait.uri, game.id, id),
+        })))
+        patchGame({ characters: [...game.characters, clone] })
+        setSelectedCharacterId(id)
+      } else {
+        if (!roleFile) throw new Error('请选择要导入的角色包')
+        const id = createNpcId()
+        const imported = await importRolePackage(roleFile, game.id, id)
+        patchGame({ characters: [...game.characters, imported] })
+        setSelectedCharacterId(id)
+      }
+      setAddCharacterOpen(false)
+    } catch (error) {
+      setRoleNotice(toMessage(error))
+    } finally {
+      setRoleWorking(false)
+    }
+  }
+
+  async function confirmExportCharacter() {
+    if (!exportCharacter) return
+    setRoleWorking(true)
+    setRoleNotice('')
+    try {
+      const path = await exportRolePackage(exportCharacter, exportNsfw)
+      setRoleNotice(`已导出：${path}`)
+      setExportCharacter(null)
+    } catch (error) {
+      setRoleNotice(toMessage(error))
+    } finally {
+      setRoleWorking(false)
+    }
   }
 
   async function addPortrait(characterId: string, file: File) {
@@ -224,10 +303,10 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
           {tab === 'characters' && <section className="character-settings-layout">
             <aside className="character-list">
               {game.characters.map((character) => <button className={character.id === selectedCharacter?.id ? 'active' : ''} key={character.id} onClick={() => setSelectedCharacterId(character.id)}><span className="character-color-dot" style={{ background: character.color }} /><span><strong>{character.name || '未命名'}</strong><small>{character.role === 'player' ? '主角' : 'NPC'}</small></span></button>)}
-              <button className="add-character-button" onClick={addNpc}><Plus size={15} />添加 NPC</button>
+              <button className="add-character-button" onClick={() => void openAddCharacter()}><Plus size={15} />添加 NPC</button>
             </aside>
             {selectedCharacter && <div className="character-editor">
-              <div className="character-editor-head"><div><span className="eyebrow">{selectedCharacter.role === 'player' ? 'PLAYER CHARACTER' : 'NON-PLAYER CHARACTER'}</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div>
+              <div className="character-editor-head"><div><span className="eyebrow">{selectedCharacter.role === 'player' ? 'PLAYER CHARACTER' : 'NON-PLAYER CHARACTER'}</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setExportNsfw(game.nsfwEnabled); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
               <div className="form-row"><label>姓名<input value={selectedCharacter.name} onChange={(event) => patchCharacter(selectedCharacter.id, { name: event.target.value })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
               <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
               <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
@@ -253,8 +332,14 @@ export default function GameSettingsDialog({ game, providers, fullSystemPrompt, 
       </section>
       {promptPreviewOpen && <div className="prompt-preview-layer" role="dialog" aria-modal="true" aria-label="完整提示词"><button className="backdrop" onClick={() => setPromptPreviewOpen(false)} aria-label="关闭完整提示词" /><section className="modal prompt-preview-modal"><div className="modal-head"><div><span className="eyebrow">COMPILED SYSTEM PROMPT</span><h2>完整提示词</h2></div><button className="icon-button" onClick={() => setPromptPreviewOpen(false)} title="关闭"><X size={20} /></button></div><pre>{fullSystemPrompt}</pre></section></div>}
       {cropTarget && <PortraitCropDialog file={cropTarget.file} onCancel={() => setCropTarget(null)} onConfirm={(file) => addPortrait(cropTarget.characterId, file)} />}
+      {addCharacterOpen && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="添加NPC"><button className="backdrop" onClick={() => !roleWorking && setAddCharacterOpen(false)} aria-label="取消添加NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">ADD CHARACTER</span><h2>添加 NPC</h2></div><button className="icon-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><div className="role-mode-tabs"><button className={addCharacterMode === 'new' ? 'active' : ''} onClick={() => setAddCharacterMode('new')}>新建</button><button className={addCharacterMode === 'clone' ? 'active' : ''} onClick={() => setAddCharacterMode('clone')}>克隆</button><button className={addCharacterMode === 'import' ? 'active' : ''} onClick={() => setAddCharacterMode('import')}>导入</button></div>{addCharacterMode === 'new' && <p className="role-mode-description">建立一个空白 NPC，之后手工填写人物设定并添加立绘。</p>}{addCharacterMode === 'clone' && <><label>来源 RPG<select value={cloneGameId} onChange={(event) => { const nextGame = games.find((item) => item.id === event.target.value); setCloneGameId(event.target.value); setCloneCharacterId(nextGame?.characters.find((character) => character.role === 'npc')?.id ?? '') }}>{games.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>来源 NPC<select value={cloneCharacterId} onChange={(event) => setCloneCharacterId(event.target.value)}><option value="">请选择 NPC</option>{cloneCandidates.map((character) => <option value={character.id} key={character.id}>{character.name || '未命名NPC'}</option>)}</select></label><p className="role-mode-description">完整复制人物设定、状态栏、颜色、NSFW 信息和全部立绘，并生成独立的新 NPC。</p></>}{addCharacterMode === 'import' && <><label>角色包<select value={roleFile} onChange={(event) => setRoleFile(event.target.value)}><option value="">请选择 `.role.rpgbox` 文件</option>{roleFiles.map((file) => <option value={file} key={file}>{file}</option>)}</select></label><p className="directory-note">请将 `.role.rpgbox` 文件放入 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>。这里只会列出角色包，不会列出完整 RPG 包。</p><button className="secondary-button" onClick={() => void listRolePackageFiles().then(setRoleFiles).catch((error) => setRoleNotice(toMessage(error)))}>重新扫描</button></>}{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>导入或克隆后可继续编辑</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmAddCharacter()} disabled={roleWorking}>{roleWorking ? '处理中' : '确认添加'}</button></div></div></section></div>}
+      {exportCharacter && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="导出NPC"><button className="backdrop" onClick={() => !roleWorking && setExportCharacter(null)} aria-label="取消导出NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT CHARACTER</span><h2>导出“{exportCharacter.name || '未命名NPC'}”</h2></div><button className="icon-button" onClick={() => setExportCharacter(null)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><p className="role-mode-description">基础设定、状态栏、颜色、常规立绘及表情标签始终会导出。</p><label className="nsfw-mode-toggle"><input type="checkbox" checked={exportNsfw} onChange={(event) => setExportNsfw(event.target.checked)} /><span><strong><span className="nsfw-mark">❤</span> 包含 NSFW 信息</strong><small>导出 NSFW 设定、NSFW 分组与专用立绘；关闭时这些内容不会写入角色包。</small></span></label><p className="directory-note">文件将保存到 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>，扩展名为 `.role.rpgbox`。</p>{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>角色包不包含 RPG 剧情或 AI 配置</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportCharacter(null)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmExportCharacter()} disabled={roleWorking}>{roleWorking ? '导出中' : '确认导出'}</button></div></div></section></div>}
     </div>
   )
+}
+
+function toMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function ParameterSlider({ label, value, min, max, step, precision = 2, onChange }: { label: string; value: number; min: number; max: number; step: number; precision?: number; onChange: (value: number) => void }) {

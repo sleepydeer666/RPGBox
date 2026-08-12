@@ -1737,6 +1737,36 @@ textarea:focus-visible {
   gap: 16px;
 }
 
+.character-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.secondary-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.secondary-icon:hover {
+  border-color: var(--gold-dark);
+  color: var(--gold);
+}
+
+.secondary-icon:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
 .character-editor-head {
   margin-bottom: 16px;
 }
@@ -1983,6 +2013,52 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   padding: 24px;
+}
+
+.role-dialog-layer {
+  z-index: 240;
+}
+
+.role-dialog {
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(680px, 92vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.role-dialog-content {
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.role-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.role-mode-tabs button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.role-mode-tabs button.active {
+  border-color: var(--gold-dark);
+  background: rgba(211, 171, 97, 0.1);
+  color: var(--gold);
+}
+
+.role-mode-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .crop-layer {

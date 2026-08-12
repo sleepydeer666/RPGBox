@@ -36,7 +36,7 @@ export async function listRpgboxFiles(): Promise<string[]> {
   await ensureRpgboxDirectory()
   const result = await Filesystem.readdir({ path: RPGBOX_DIRECTORY, directory: Directory.Documents })
   return result.files
-    .filter((file) => file.type === 'file' && file.name.toLocaleLowerCase().endsWith('.rpgbox'))
+    .filter((file) => file.type === 'file' && file.name.toLocaleLowerCase().endsWith('.rpgbox') && !file.name.toLocaleLowerCase().endsWith('.role.rpgbox'))
     .map((file) => file.name)
     .sort((left, right) => left.localeCompare(right, 'zh-CN'))
 }
