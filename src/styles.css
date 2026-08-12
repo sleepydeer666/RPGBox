@@ -271,13 +271,20 @@ textarea:focus-visible {
   display: block;
 }
 
+.character-status-control {
+  width: 60%;
+  height: 36px;
+  position: absolute;
+  bottom: 10px;
+  z-index: 8;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
 .character-status-button {
   width: 36px;
   height: 36px;
-  position: absolute;
-  right: 8px;
-  bottom: 10px;
-  z-index: 8;
   border: 1px solid rgba(229, 207, 158, 0.58);
   border-radius: 50%;
   background: rgba(18, 19, 17, 0.82);
@@ -290,6 +297,30 @@ textarea:focus-visible {
 
 .character-status-button:active {
   background: rgba(211, 171, 97, 0.36);
+}
+
+.character-status-button.status-changed {
+  animation: status-change-flash 900ms ease-out 1;
+}
+
+@keyframes status-change-flash {
+  0%, 100% {
+    border-color: rgba(229, 207, 158, 0.58);
+    background: rgba(18, 19, 17, 0.82);
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.46);
+  }
+  35% {
+    border-color: #fff0b8;
+    background: rgba(211, 171, 97, 0.78);
+    color: #ffffff;
+    box-shadow: 0 0 0 6px rgba(211, 171, 97, 0.2), 0 0 24px rgba(240, 214, 157, 0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .character-status-button.status-changed {
+    animation-duration: 1ms;
+  }
 }
 
 .character-status-overlay {
@@ -778,17 +809,35 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
-.drawer-settings-button {
+.drawer-footer-actions {
   min-height: calc(58px + env(safe-area-inset-bottom));
-  padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
-  border: 0;
+  padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--line);
   background: #1b1d19;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.drawer-footer-actions button {
+  min-width: 0;
+  padding: 10px 18px;
+  border: 0;
+  background: transparent;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 11px;
   color: #d8d9d2;
   cursor: pointer;
+}
+
+.drawer-footer-actions button + button {
+  border-left: 1px solid var(--line);
+}
+
+.drawer-footer-actions button:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--gold);
 }
 
 .modal-layer.drawer-dialog-layer {
@@ -797,6 +846,41 @@ textarea:focus-visible {
 
 .drawer-dialog {
   width: min(520px, 100%);
+}
+
+.about-modal {
+  width: min(460px, 100%);
+}
+
+.about-content {
+  padding: 22px 20px 26px;
+  display: grid;
+  gap: 18px;
+}
+
+.about-content > div {
+  display: grid;
+  gap: 6px;
+}
+
+.about-content span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.about-content strong {
+  color: var(--gold);
+  font-size: 22px;
+}
+
+.about-content a {
+  color: var(--teal);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.about-content a:hover {
+  text-decoration: underline;
 }
 
 .drawer-dialog-content {
@@ -1338,6 +1422,31 @@ textarea:focus-visible {
   grid-template-columns: 40px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+}
+
+.empty-rpg-dock {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.start-game-button {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 18px;
+  border: 1px solid var(--gold-dark);
+  border-radius: 5px;
+  background: var(--gold);
+  color: #161713;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.start-game-button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .rewind-button {
@@ -2617,6 +2726,9 @@ textarea:focus-visible {
 
 .memory-modal {
   width: min(680px, 100%);
+  height: min(760px, 92vh);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .memory-editors {
@@ -2632,10 +2744,14 @@ textarea:focus-visible {
 .memory-primary-editor {
   min-height: 260px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.memory-editors > label {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .memory-editor-head {
@@ -2649,6 +2765,19 @@ textarea:focus-visible {
   min-height: 28px;
   padding: 4px 8px;
   font-size: 10px;
+}
+
+.memory-editor-head small {
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.memory-capacity-note {
+  margin: 0;
+  color: #8f9189;
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .memory-editors textarea {
@@ -2672,14 +2801,33 @@ textarea:focus-visible {
   gap: 12px;
 }
 
-.recent-memory-list label {
+.memory-entry {
   display: grid;
   gap: 6px;
 }
 
-.recent-memory-list label > span {
+.memory-entry-head {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.memory-entry-head > span {
+  min-width: 0;
   color: #c6c8c0;
   font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.memory-delete-button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
 }
 
 .recent-memory-list textarea {
@@ -2832,12 +2980,33 @@ textarea:focus-visible {
   }
 
   .memory-editors {
+    display: block;
     grid-template-columns: 1fr;
   }
 
   .memory-editors > label,
-  .memory-primary-editor,
+  .memory-primary-editor {
+    min-height: 180px;
+  }
+
+  .memory-primary-editor {
+    display: block;
+  }
+
+  .memory-primary-editor > .memory-editor-head {
+    margin-bottom: 8px;
+  }
+
+  .recent-memory-list {
+    overflow: visible;
+  }
+
+  .distant-memory-editor {
+    margin-top: 18px;
+  }
+
   .memory-editors textarea {
+    width: 100%;
     min-height: 180px;
   }
   .topbar {
@@ -2978,6 +3147,10 @@ textarea:focus-visible {
     max-height: 94vh;
     border-radius: 7px 7px 0 0;
     border-bottom: 0;
+  }
+
+  .memory-modal {
+    height: 94vh;
   }
 
   .settings-grid {

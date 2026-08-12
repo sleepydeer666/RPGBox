@@ -63,4 +63,48 @@ describe('streamCompletion', () => {
       stream: true,
     })
   })
+
+  it('finishes when the provider sends finish_reason without closing the stream', async () => {
+    const encoder = new TextEncoder()
+    let cancelled = false
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"完整回复"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+
+    const result = await streamCompletion({
+      provider: { id: 'test', name: 'test', baseUrl: 'https://example.com/v1', apiKey: 'key', model: 'model', models: ['model'], temperature: 1, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: 100 },
+      messages: [],
+    })
+
+    expect(result).toBe('完整回复')
+    expect(cancelled).toBe(true)
+  })
+
+  it('reports when an SSE completion reaches the token limit', async () => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"未完成"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'))
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+    const finishReasons: string[] = []
+
+    const result = await streamCompletion({
+      provider: { id: 'test', name: 'test', baseUrl: 'https://example.com/v1', apiKey: 'key', model: 'model', models: ['model'], temperature: 1, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: 100 },
+      messages: [],
+      onFinishReason: (reason) => finishReasons.push(reason),
+    })
+
+    expect(result).toBe('未完成')
+    expect(finishReasons).toEqual(['length'])
+  })
 })

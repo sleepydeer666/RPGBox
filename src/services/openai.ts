@@ -5,6 +5,7 @@ export interface CompletionRequest {
   messages: Array<{ role: string; content: string }>
   signal?: AbortSignal
   onToken?: (fullText: string) => void
+  onFinishReason?: (reason: string) => void
 }
 
 export function normalizeBaseUrl(baseUrl: string): string {
@@ -79,11 +80,28 @@ function extractDelta(payload: unknown): string {
   return ''
 }
 
+function extractFinishReason(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const record = payload as Record<string, unknown>
+  const choices = record.choices
+  if (Array.isArray(choices)) {
+    for (const candidate of choices) {
+      if (!candidate || typeof candidate !== 'object') continue
+      const choice = candidate as Record<string, unknown>
+      const reason = choice.finish_reason ?? choice.finishReason
+      if (typeof reason === 'string' && reason.trim()) return reason.trim()
+    }
+  }
+  const reason = record.stop_reason ?? record.stopReason
+  return typeof reason === 'string' && reason.trim() ? reason.trim() : undefined
+}
+
 export async function streamCompletion({
   provider,
   messages,
   signal,
   onToken,
+  onFinishReason,
 }: CompletionRequest): Promise<string> {
   if (!provider.apiKey.trim()) throw new Error('请先在 API 设置中填写密钥')
   if (!provider.baseUrl.trim() || !provider.model.trim()) throw new Error('Base URL 和模型名不能为空')
@@ -119,7 +137,10 @@ export async function streamCompletion({
 
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
-    const text = extractDelta(await response.json())
+    const payload = await response.json()
+    const text = extractDelta(payload)
+    const finishReason = extractFinishReason(payload)
+    if (finishReason) onFinishReason?.(finishReason)
     onToken?.(text)
     return text
   }
@@ -136,25 +157,43 @@ export async function streamCompletion({
     const lines = buffer.split(/\r?\n/)
     buffer = lines.pop() ?? ''
 
+    let finished = false
     for (const line of lines) {
-      fullText = consumeEventLine(line, fullText, onToken)
+      const event = consumeEventLine(line, fullText, onToken)
+      fullText = event.text
+      if (event.finishReason) onFinishReason?.(event.finishReason)
+      if (event.finished) {
+        finished = true
+        break
+      }
+    }
+    if (finished) {
+      await reader.cancel()
+      return fullText
     }
   }
 
-  if (buffer.trim()) fullText = consumeEventLine(buffer, fullText, onToken)
+  if (buffer.trim()) {
+    const event = consumeEventLine(buffer, fullText, onToken)
+    fullText = event.text
+    if (event.finishReason) onFinishReason?.(event.finishReason)
+  }
 
   return fullText
 }
 
 function consumeEventLine(line: string, current: string, onToken?: (fullText: string) => void) {
   const data = line.trim().replace(/^data:\s*/, '')
-  if (!data || data === '[DONE]') return current
+  if (!data) return { text: current, finished: false, finishReason: undefined }
+  if (data === '[DONE]') return { text: current, finished: true, finishReason: undefined }
   try {
-    const next = current + extractDelta(JSON.parse(data))
+    const payload = JSON.parse(data)
+    const next = current + extractDelta(payload)
     onToken?.(next)
-    return next
+    const finishReason = extractFinishReason(payload)
+    return { text: next, finished: Boolean(finishReason), finishReason }
   } catch {
     // Providers may insert keepalive comments between SSE events.
-    return current
+    return { text: current, finished: false, finishReason: undefined }
   }
 }

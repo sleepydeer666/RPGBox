@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialGame } from '../game'
 import type { RollbackSnapshot } from '../types'
-import { appendRollbackSnapshot, createRollbackSnapshot, restoreLastRollback } from './rollback'
+import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback } from './rollback'
 
 describe('RPG turn rollback', () => {
   it('restores messages, state and memory from the previous turn', () => {
@@ -33,5 +33,32 @@ describe('RPG turn rollback', () => {
     const log = Array.from({ length: 6 }, (_, index) => createRollbackSnapshot(game, `rollback-${index}`, index))
       .reduce<RollbackSnapshot[]>((current, snapshot) => appendRollbackSnapshot(current, snapshot), [])
     expect(log.map((snapshot) => snapshot.id)).toEqual(['rollback-1', 'rollback-2', 'rollback-3', 'rollback-4', 'rollback-5'])
+  })
+
+  it('returns previous statuses only for the latest complete turn', () => {
+    const game = createInitialGame()
+    const snapshot = createRollbackSnapshot(game, 'rollback-latest', 1)
+    const after = {
+      ...game,
+      messages: [
+        ...game.messages,
+        { id: 'user-1', role: 'user' as const, content: '继续', createdAt: 2 },
+        { id: 'assistant-1', role: 'assistant' as const, content: '回答', createdAt: 3 },
+      ],
+      rollbackLog: [snapshot],
+    }
+
+    expect(latestTurnPreviousStatuses(after)).toEqual(snapshot.characterStatuses)
+    expect(latestTurnPreviousStatuses({ ...after, rollbackLog: [{ ...snapshot, messageCount: 0 }] })).toBeUndefined()
+  })
+
+  it('marks only changed non-empty statuses for notification', () => {
+    const changed = changedStatusCharacterIds({ a: '疲惫', b: '', c: '平静' }, [
+      { characterId: 'a', characterName: 'A', status: '振奋' },
+      { characterId: 'b', characterName: 'B', status: '紧张' },
+      { characterId: 'c', characterName: 'C', status: '平静' },
+    ])
+
+    expect([...changed]).toEqual(['a'])
   })
 })

@@ -28,7 +28,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   const [portraitError, setPortraitError] = useState('')
   const [cropTarget, setCropTarget] = useState<{ characterId: string; file: File } | null>(null)
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
-  const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 12))
+  const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 15))
   const [memoryLimitDraft, setMemoryLimitDraft] = useState(String(game.memory.recentChapterLimit ?? 5))
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
@@ -57,7 +57,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   }, [game.characters, selectedCharacter])
 
   useEffect(() => {
-    setContextTurnsDraft(String(game.aiSettings.contextTurns ?? 12))
+    setContextTurnsDraft(String(game.aiSettings.contextTurns ?? 15))
     setMemoryLimitDraft(String(game.memory.recentChapterLimit ?? 5))
     setPortraitTagDrafts({})
   }, [game.id])
@@ -77,7 +77,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     const parsed = Number(contextTurnsDraft)
     const contextTurns = contextTurnsDraft.trim() && Number.isFinite(parsed)
       ? Math.min(100, Math.max(1, Math.round(parsed)))
-      : 12
+      : 15
     const parsedMemoryLimit = Number(memoryLimitDraft)
     const recentChapterLimit = memoryLimitDraft.trim() && Number.isFinite(parsedMemoryLimit)
       ? clampRecentChapterLimit(parsedMemoryLimit)
@@ -310,7 +310,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <div className="form-row"><label>姓名<input value={selectedCharacter.name} onChange={(event) => patchCharacter(selectedCharacter.id, { name: event.target.value })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
               <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
               <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
-              <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>
+              {Boolean(game.statusRulesPrompt?.trim()) && <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>}
               {game.nsfwEnabled && <label><span className="nsfw-mark">❤</span> NSFW设定<span className="field-description">描述人物NSFW相关的设定，如H经验、XP、特殊敏感带、NSFW场景下特殊反应等</span><textarea className="character-description" value={selectedCharacter.nsfwDescription ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { nsfwDescription: event.target.value })} placeholder="可留空；仅在NSFW内容中使用" /></label>}
               <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{visiblePortraits.length} 张</span></div><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label></div>
               {portraitError && <div className="inline-error">{portraitError}</div>}

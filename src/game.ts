@@ -19,8 +19,8 @@ export function createDefaultAiSettings(provider?: ProviderProfile): GameAiSetti
     topP: provider?.topP ?? 1,
     presencePenalty: provider?.presencePenalty ?? 0,
     frequencyPenalty: provider?.frequencyPenalty ?? 0,
-    maxTokens: provider?.maxTokens ?? 1800,
-    contextTurns: 12,
+    maxTokens: 10000,
+    contextTurns: 15,
   }
 }
 

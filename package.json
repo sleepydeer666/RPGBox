@@ -1,7 +1,7 @@
 {
   "name": "rpgbox",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "test": "vitest run",
     "android:sync": "pnpm build && cap sync android",
     "android:apk": "pnpm android:sync && cd android && gradlew.bat assembleDebug --no-daemon --max-workers=1",
+    "android:release": "pnpm android:sync && cd android && gradlew.bat assembleRelease --no-daemon --max-workers=1",
     "android:open": "cap open android"
   },
   "dependencies": {

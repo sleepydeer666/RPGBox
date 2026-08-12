@@ -17,7 +17,7 @@ export const DEFAULT_PROVIDER: ProviderProfile = {
   topP: 1,
   presencePenalty: 0,
   frequencyPenalty: 0,
-  maxTokens: 1800,
+  maxTokens: 10000,
 }
 
 export const DEFAULT_GAME_STATE: GameState = {

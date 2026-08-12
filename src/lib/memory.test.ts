@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampRecentChapterLimit, formatRecentChapterMemories, normalizeMemoryState, partitionRecentChapterMemories } from './memory'
+import { clampRecentChapterLimit, closesChapter, formatRecentChapterMemories, normalizeMemoryState, partitionRecentChapterMemories } from './memory'
 
 describe('chapter memory model', () => {
   it('migrates the legacy chapter summary into the current chapter summary', () => {
@@ -30,5 +30,13 @@ describe('chapter memory model', () => {
     const partitioned = partitionRecentChapterMemories(chapters, 5)
     expect(partitioned.overflow.map((chapter) => chapter.id)).toEqual(['c0', 'c1'])
     expect(partitioned.retained.map((chapter) => chapter.id)).toEqual(['c2', 'c3', 'c4', 'c5', 'c6'])
+  })
+
+  it('closes a named chapter only when entering another chapter or a transition', () => {
+    expect(closesChapter('旅店疑云', '地下遗迹')).toBe(true)
+    expect(closesChapter('旅店疑云', '')).toBe(true)
+    expect(closesChapter('旅店疑云', '旅店疑云')).toBe(false)
+    expect(closesChapter('旅店疑云', undefined)).toBe(false)
+    expect(closesChapter('', '地下遗迹')).toBe(false)
   })
 })

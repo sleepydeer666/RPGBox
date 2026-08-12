@@ -42,3 +42,9 @@ export function partitionRecentChapterMemories(chapters: ChapterMemory[], limit:
     retained: chapters.slice(overflowCount),
   }
 }
+
+export function closesChapter(previousChapter: string, reportedChapter: string | undefined): boolean {
+  return Boolean(previousChapter.trim())
+    && reportedChapter !== undefined
+    && reportedChapter.trim() !== previousChapter.trim()
+}

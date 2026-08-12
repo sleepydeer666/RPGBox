@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectRecentActors } from './stage'
+import { collectRecentActors, collectTurnActors, includeActiveSpeaker } from './stage'
 import type { CharacterProfile, StorySegment } from '../types'
 
 const characters: CharacterProfile[] = ['a', 'b', 'c'].map((id) => ({
@@ -107,5 +107,35 @@ describe('collectRecentActors', () => {
     ], characters, 4, 'normal', true)
 
     expect(actors.map((actor) => actor.character.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('temporary and choice actors', () => {
+  it('temporarily adds the active speaker even when the character is not present', () => {
+    const present = collectRecentActors([
+      { segments: [], presentCharacterIds: ['a'] },
+    ], characters, 2, 'normal', true)
+
+    const speaking = includeActiveSpeaker(present, { type: 'dialogue', characterId: 'b', expression: '紧张', text: '等等。' }, characters)
+    expect(speaking.map((actor) => actor.character.id)).toEqual(['a', 'b'])
+    expect(speaking[1].expression).toBe('紧张')
+    const afterSpeaking = includeActiveSpeaker(present, { type: 'narration', text: '话音落下。' }, characters)
+    expect(afterSpeaking.map((actor) => actor.character.id)).toEqual(['a'])
+  })
+
+  it('collects every NPC who spoke this turn and then fills present NPCs up to four', () => {
+    const extra = ['d', 'e'].map((id) => ({
+      ...characters[0], id, name: id.toUpperCase(), portraits: [{ id: `${id}-normal`, expression: '平静', uri: `file:///${id}.png`, groups: ['normal' as const] }],
+    }))
+    const allCharacters = [...characters, ...extra]
+    const actors = collectTurnActors([
+      { type: 'dialogue', characterId: 'a', expression: '平静', text: '一' },
+      { type: 'dialogue', characterId: 'b', expression: '开心', text: '二' },
+      { type: 'dialogue', characterId: 'a', expression: '生气', text: '三' },
+      { type: 'dialogue', characterId: 'c', expression: '紧张', text: '四' },
+    ], allCharacters, ['d', 'e'], 4)
+
+    expect(actors.map((actor) => actor.character.id)).toEqual(['a', 'b', 'c', 'd'])
+    expect(actors[0].expression).toBe('生气')
   })
 })
