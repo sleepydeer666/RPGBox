@@ -69,6 +69,8 @@ export interface GameState {
   time: string
   contentMode: PortraitGroup
   values: Record<string, string | number | boolean>
+  /** Character IDs explicitly reported as present in the current scene. */
+  presentCharacterIds?: string[]
 }
 
 export interface MemoryState {

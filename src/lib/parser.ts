@@ -9,7 +9,7 @@ const PLAYER_DIALOGUE_LINE_PATTERN = /^\s*(你|我|主角)\s*[：:]\s*(.+?)\s*$/
 const NARRATION_LINE_PATTERN = /^\s*\[旁白\]\s*(.+?)\s*$/u
 const SCENE_LINE_PATTERN = /^\s*\[场景\]\s*地点[：:]\s*(.+?)\s*[；;]\s*时间[：:]\s*(.+?)\s*$/u
 const STATUS_LINE_PATTERN = /^\s*\[状态\]\s*(.*?)\s*$/iu
-const STATUS_FIELD_PATTERN = /(?:^|[；;|｜])\s*(模式|地点|时间|章节|场景)\s*[：:]\s*([^；;|｜]*)/giu
+const STATUS_FIELD_PATTERN = /(?:^|[；;|｜])\s*(模式|地点|时间|章节|场景|在场人物|在场角色)\s*[：:]\s*([^；;|｜]*)/giu
 const CHARACTER_STATUS_LINE_PATTERN = /^\s*\[([^\]\n]{1,30})\]\s*状态\s*[：:]\s*(.+?)\s*$/u
 const CHAPTER_START_PATTERN = /^\s*\[篇章开始\]\s*(.+?)\s*$/u
 const CHAPTER_END_PATTERN = /^\s*\[篇章结束\]\s*$/u
@@ -62,6 +62,7 @@ interface ParsedStatusLine {
   time?: string
   chapter?: string
   scene?: '延续' | '切换'
+  presentCharacters?: string[]
 }
 
 function parseStatusLine(line: string): ParsedStatusLine | undefined {
@@ -76,6 +77,11 @@ function parseStatusLine(line: string): ParsedStatusLine | undefined {
     if (key === '时间' && value) parsed.time = value
     if (key === '章节') parsed.chapter = value
     if (key === '场景' && (value === '延续' || value === '切换')) parsed.scene = value
+    if (key === '在场人物' || key === '在场角色') {
+      parsed.presentCharacters = /^(无|没有|无人在场)$/u.test(value)
+        ? []
+        : value.split(/[、,，/／|｜]/u).map((item) => item.trim()).filter(Boolean)
+    }
   }
   return parsed
 }
@@ -174,13 +180,19 @@ function normalizeDialogueExpressions(segments: StorySegment[], context: Respons
   })
 }
 
-function deriveStatePatch(story: string): Record<string, unknown> | undefined {
+function deriveStatePatch(story: string, context: ResponseParseContext): Record<string, unknown> | undefined {
   const patch: Record<string, unknown> = {}
   const status = story.split(/\n+/).map(parseStatusLine).find(Boolean)
   if (status) {
     if (status.mode) patch.contentMode = status.mode
     if (status.location) patch.location = status.location
     if (status.time) patch.time = status.time
+    if (status.presentCharacters) {
+      patch.presentCharacterIds = status.presentCharacters.flatMap((name) => {
+        const character = findCharacter(context, name)
+        return character ? [character.id] : []
+      })
+    }
   }
   const scene = story.split(/\n+/).map((line) => line.match(SCENE_LINE_PATTERN)).find(Boolean)
   if (scene && !status) {
@@ -231,7 +243,7 @@ export function parseAssistantResponse(raw: string, context: ResponseParseContex
   const segments = normalizeDialogueExpressions(parsedSegments, context, status?.mode ?? context.contentMode ?? 'normal')
 
   if (!gameData) {
-    gameData = { segments, choices, statePatch: deriveStatePatch(story), chapterTitle: status?.chapter }
+    gameData = { segments, choices, statePatch: deriveStatePatch(story, context), chapterTitle: status?.chapter }
   } else {
     gameData.segments = segments
     if (status && Object.hasOwn(status, 'chapter')) gameData.chapterTitle = status.chapter

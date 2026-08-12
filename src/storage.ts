@@ -62,7 +62,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
             ? { ...message, content: OPENING_MESSAGE }
             : message,
         ),
-        gameState: { location: parsed.gameState?.location ?? '未知', time: parsed.gameState?.time ?? '未知', contentMode: parsed.gameState?.contentMode ?? 'normal', values: parsed.gameState?.values ?? {} },
+        gameState: { location: parsed.gameState?.location ?? '未知', time: parsed.gameState?.time ?? '未知', contentMode: parsed.gameState?.contentMode ?? 'normal', values: parsed.gameState?.values ?? {}, presentCharacterIds: parsed.gameState?.presentCharacterIds },
         narrative: createDefaultNarrative('雨夜来客', '', (parsed.messages ?? [])[0]?.id ?? ''),
         memory: normalizeMemoryState({ historicalSummary: parsed.memory?.summary ?? '' }),
         updatedAt: Date.now(),
@@ -110,7 +110,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
           ? { ...message, content: OPENING_MESSAGE }
           : message,
       ),
-      gameState: { location: legacy.gameState.location ?? '未知', time: legacy.gameState.time ?? '未知', contentMode: legacy.gameState.contentMode ?? 'normal', values: legacy.gameState.values ?? {} },
+      gameState: { location: legacy.gameState.location ?? '未知', time: legacy.gameState.time ?? '未知', contentMode: legacy.gameState.contentMode ?? 'normal', values: legacy.gameState.values ?? {}, presentCharacterIds: legacy.gameState.presentCharacterIds },
       narrative,
       memory: normalizeMemoryState({
         ...memory,

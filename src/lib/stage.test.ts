@@ -88,4 +88,24 @@ describe('collectRecentActors', () => {
     expect(collectRecentActors([{ segments }], [...characters, noPortrait, nsfwOnly], 2, 'normal').map((actor) => actor.character.id)).toEqual(['a'])
     expect(collectRecentActors([{ segments }], [...characters, noPortrait, nsfwOnly], 2, 'nsfw').map((actor) => actor.character.id)).toEqual(['nsfw'])
   })
+
+  it('removes characters explicitly reported as no longer present', () => {
+    const actors = collectRecentActors([
+      { segments: [
+        { type: 'dialogue', characterId: 'a', text: '一' },
+        { type: 'dialogue', characterId: 'b', text: '二' },
+      ], presentCharacterIds: ['a', 'b'] },
+      { segments: [{ type: 'dialogue', characterId: 'a', text: '三' }], presentCharacterIds: ['a'] },
+    ], characters, 2)
+
+    expect(actors.map((actor) => actor.character.id)).toEqual(['a'])
+  })
+
+  it('adds a present character even before that character speaks', () => {
+    const actors = collectRecentActors([
+      { segments: [{ type: 'narration', text: '两人走进房间。' }], presentCharacterIds: ['a', 'b'] },
+    ], characters, 4, 'normal', true)
+
+    expect(actors.map((actor) => actor.character.id)).toEqual(['a', 'b'])
+  })
 })

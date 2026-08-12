@@ -12,7 +12,7 @@ describe('buildSystemPrompt', () => {
       nsfwScenePrompt: '成人场景偏好',
       worldSettingPrompt: '架空都市',
       characters: [{ id: 'player', role: 'player', name: '主角', gender: '男', description: '', color: '#ffffff', portraits: [] }],
-      gameState: { location: '旅店', time: '夜晚', contentMode: 'normal', values: {} },
+      gameState: { location: '旅店', time: '夜晚', contentMode: 'normal', values: {}, presentCharacterIds: ['player'] },
       narrative: {
         chapter: { id: 'chapter-1', title: '旅店疑云', startedAtMessageId: 'a1' },
         unit: { id: 'unit-1', title: '深夜会面', startedAtMessageId: 'a1' },
@@ -39,6 +39,8 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('[旁白] 叙述文字')
     expect(prompt).toContain('[选项A] 具体行动')
     expect(prompt).toContain('章节：当前活动主题')
+    expect(prompt).toContain('在场人物：角色姓名列表')
+    expect(prompt).toContain('- 在场人物：主角')
     expect(prompt).toContain('## 当前章节\n旅店疑云')
     expect(prompt).not.toContain('单元：深夜会面')
     expect(prompt).not.toContain('单元是围绕')

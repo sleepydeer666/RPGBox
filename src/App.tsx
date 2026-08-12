@@ -1,4 +1,4 @@
-import { AlertTriangle, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, Clock3, Flag, History, MapPin, Menu, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, MapPin, Menu, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GameDrawer from './components/GameDrawer'
 import GameSettingsDialog from './components/GameSettingsDialog'
@@ -46,6 +46,7 @@ function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [debugOpen, setDebugOpen] = useState(false)
   const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
+  const [viewedStatusCharacterId, setViewedStatusCharacterId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [summarizingMemory, setSummarizingMemory] = useState<'chapter' | 'history' | null>(null)
   const [error, setError] = useState('')
@@ -85,7 +86,7 @@ function App() {
   const previousStageTurns = useMemo(() => activeGame.messages.flatMap((message): StageTurn[] => {
     if (message.role !== 'assistant' || message.id === latestAssistant?.id) return []
     const parsed = parseAssistantResponse(message.content, { characters: activeGame.characters })
-    return [{ segments: parsed.segments, sceneChanged: parsed.sceneChanged }]
+    return [{ segments: parsed.segments, sceneChanged: parsed.sceneChanged, presentCharacterIds: parsed.gameData?.statePatch?.presentCharacterIds as string[] | undefined }]
   }), [activeGame.characters, activeGame.messages, latestAssistant?.id])
   const currentStageParse = busy ? streamingParsed : latestParsed
   const displayGameState = applyRpgStatePatch(activeGame.gameState, currentStageParse.gameData?.statePatch, activeGame.nsfwEnabled)
@@ -94,12 +95,13 @@ function App() {
     : activeGame.narrative.chapter.title.trim()
   const dialogueActors = collectRecentActors([
     ...previousStageTurns,
-    { segments: playback.segments.slice(0, segmentIndex + 1), sceneChanged: currentStageParse.sceneChanged },
+    { segments: playback.segments.slice(0, segmentIndex + 1), sceneChanged: currentStageParse.sceneChanged, presentCharacterIds: currentStageParse.gameData?.statePatch?.presentCharacterIds as string[] | undefined },
   ], activeGame.characters, 2, displayGameState.contentMode)
   const choiceActors = collectRecentActors([
     ...previousStageTurns,
-    { segments: latestParsed.segments, sceneChanged: latestParsed.sceneChanged },
-  ], activeGame.characters, 4, displayGameState.contentMode)
+    { segments: latestParsed.segments, sceneChanged: latestParsed.sceneChanged, presentCharacterIds: latestParsed.gameData?.statePatch?.presentCharacterIds as string[] | undefined },
+  ], activeGame.characters.filter((character) => character.role === 'npc'), 4, displayGameState.contentMode, true)
+  const visibleStatusActors = choicesVisible ? choiceActors : dialogueActors
   const historyLines = useMemo(
     () => buildHistoryLines(activeGame.messages, busy ? latestAssistant?.id : undefined, activeGame.characters),
     [activeGame.characters, activeGame.messages, busy, latestAssistant?.id],
@@ -121,6 +123,16 @@ function App() {
     const timer = window.setTimeout(() => void saveState({ providers, activeProviderId, globalJailbreakPrompt, games, activeGameId }), 250)
     return () => window.clearTimeout(timer)
   }, [activeGameId, activeProviderId, games, globalJailbreakPrompt, hydrated, providers])
+
+  useEffect(() => {
+    setViewedStatusCharacterId(null)
+  }, [activeGameId, activeGame.messages.length])
+
+  useEffect(() => {
+    if (viewedStatusCharacterId && !visibleStatusActors.some((actor) => actor.character.id === viewedStatusCharacterId)) {
+      setViewedStatusCharacterId(null)
+    }
+  }, [viewedStatusCharacterId, visibleStatusActors])
 
   function updateGame(gameId: string, updater: (game: GameSession) => GameSession) {
     setGames((current) => current.map((game) => game.id === gameId ? updater(game) : game))
@@ -211,6 +223,7 @@ function App() {
   }
 
   function resetStory() {
+    setViewedStatusCharacterId(null)
     const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     updateGame(activeGame.id, (game) => ({
       ...game,
@@ -240,6 +253,7 @@ function App() {
     if (busy || summarizingMemory) return
     const restoredGame = restoreLastRollback(activeGame)
     if (!restoredGame) return
+    setViewedStatusCharacterId(null)
     const messages = restoredGame.messages
     const latest = [...messages].reverse().find((message) => message.role === 'assistant')
     const restored = parseAssistantResponse(latest?.content ?? '', { characters: activeGame.characters })
@@ -316,6 +330,7 @@ function App() {
     const supplement = customInput.trim()
     const input = forcedInput?.trim() || [choiceText, supplement].filter(Boolean).join('，但是')
     if (!input || busy || summarizingMemory || !activeProvider) return
+    setViewedStatusCharacterId(null)
 
     const gameId = activeGame.id
     const gameSnapshot = activeGame
@@ -497,15 +512,15 @@ function App() {
             {activeGame.nsfwEnabled && <span className={`content-mode ${displayGameState.contentMode}`}>{displayGameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}</span>}
           </div>
           {choicesVisible ? (
-            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} mode={displayGameState.contentMode} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} />
+            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} />
           ) : busy && currentSegment?.type === 'dialogue' ? (
-            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} streaming />
+            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} streaming />
           ) : busy ? (
-            <NarrationScene text={currentSegment?.text || '正在生成'} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} streaming />
+            <NarrationScene text={currentSegment?.text || '正在生成'} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} streaming />
           ) : currentSegment?.type === 'dialogue' ? (
-            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} />
+            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} />
           ) : (
-            <NarrationScene text={currentSegment?.text || '...'} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} />
+            <NarrationScene text={currentSegment?.text || '...'} characters={activeGame.characters} actors={dialogueActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} />
           )}
         </div>
 
@@ -599,7 +614,12 @@ function MemoryDialog({ game, summarizing, onSummarize, onChange, onClose }: {
   )
 }
 
-function DialogueScene({ segment, characters, actors, mode, streaming = false }: { segment: StorySegment; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean }) {
+interface StatusViewProps {
+  viewedStatusCharacterId: string | null
+  onViewStatus: (characterId: string | null) => void
+}
+
+function DialogueScene({ segment, characters, actors, mode, viewedStatusCharacterId, onViewStatus, streaming = false }: { segment: StorySegment; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean } & StatusViewProps) {
   const character = characters.find((item) => item.id === segment.characterId)
     ?? characters.find((item) => item.name === segment.characterName)
   const { portrait, displayExpression } = resolveCharacterExpression(character, segment.expression, mode)
@@ -612,6 +632,8 @@ function DialogueScene({ segment, characters, actors, mode, streaming = false }:
       actors={actors.length ? actors : portrait && character ? [{ character, expression: segment.expression ?? '' }] : []}
       activeCharacterId={portrait ? character?.id : undefined}
       mode={mode}
+      viewedStatusCharacterId={viewedStatusCharacterId}
+      onViewStatus={onViewStatus}
     >
       <div className={`dialogue-box ${streaming ? 'streaming' : ''}`} style={{ borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 14%, rgba(18, 19, 17, 0.96))` }}>
         <div className="speaker-line"><strong style={{ color }}>{speakerName}</strong><span>{displayExpression}</span></div>
@@ -621,17 +643,17 @@ function DialogueScene({ segment, characters, actors, mode, streaming = false }:
   )
 }
 
-function NarrationScene({ text, characters, actors, mode, streaming = false }: { text: string; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean }) {
+function NarrationScene({ text, characters, actors, mode, viewedStatusCharacterId, onViewStatus, streaming = false }: { text: string; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean } & StatusViewProps) {
   return (
-    <StoryScene actors={actors} mode={mode}>
+    <StoryScene actors={actors} mode={mode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus}>
       <div className={`narration-panel ${streaming ? 'streaming' : ''}`}><p><CharacterText text={text} characters={characters} narration /></p></div>
     </StoryScene>
   )
 }
 
-function ChoiceScene({ choices, selectedChoices, actors, characters, mode, onToggle, onCloseChapter }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; mode: PortraitGroup; onToggle: (choice: Choice) => void; onCloseChapter: () => void }) {
+function ChoiceScene({ choices, selectedChoices, actors, characters, mode, viewedStatusCharacterId, onViewStatus, onToggle, onCloseChapter }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; mode: PortraitGroup; onToggle: (choice: Choice) => void; onCloseChapter: () => void } & StatusViewProps) {
   return (
-    <StoryScene actors={actors} mode={mode} className="choice-scene">
+    <StoryScene actors={actors} mode={mode} className="choice-scene" viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus}>
       <section className="choice-overlay" aria-label="剧情选项" onClick={(event) => event.stopPropagation()}>
         <div className="selection-heading">
           <div className="selection-prompt">请选择</div>
@@ -646,7 +668,7 @@ function ChoiceScene({ choices, selectedChoices, actors, characters, mode, onTog
   )
 }
 
-function StoryScene({ actors, activeCharacterId, mode, className = '', children }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; className?: string; children: React.ReactNode }) {
+function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, onViewStatus, className = '', children }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; className?: string; children: React.ReactNode } & StatusViewProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const lastTouchYRef = useRef(0)
   const dragDistanceRef = useRef(0)
@@ -684,27 +706,44 @@ function StoryScene({ actors, activeCharacterId, mode, className = '', children 
           event.stopPropagation()
           suppressClickRef.current = false
         }}
-      ><StagePortraits actors={actors} activeCharacterId={activeCharacterId} mode={mode} /></div>
+      >
+        <StagePortraits actors={actors} activeCharacterId={activeCharacterId} mode={mode} onViewStatus={onViewStatus} />
+        {viewedStatusCharacterId && <CharacterStatusOverlay character={actors.find((actor) => actor.character.id === viewedStatusCharacterId)?.character} onClose={() => onViewStatus(null)} />}
+      </div>
       <div className="content-zone" ref={contentRef}>{children}</div>
     </div>
   )
 }
 
-function StagePortraits({ actors, activeCharacterId, mode }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup }) {
+function StagePortraits({ actors, activeCharacterId, mode, onViewStatus }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; onViewStatus: (characterId: string) => void }) {
   const visibleActors = actors.flatMap((actor) => {
     const resolved = resolveCharacterExpression(actor.character, actor.expression, mode)
     return resolved.portrait ? [{ ...actor, portrait: resolved.portrait }] : []
   })
   return (
-    <div className={`stage-portrait-layer count-${visibleActors.length}`} aria-hidden="true">
+    <div className={`stage-portrait-layer count-${visibleActors.length}`}>
       {visibleActors.map(({ character, portrait }, index) => {
         const active = activeCharacterId === character.id
         const inactive = Boolean(activeCharacterId) && !active
         return <div className={`stage-portrait slot-${index + 1} has-image ${active ? 'active' : ''} ${inactive ? 'inactive' : ''}`} key={character.id}>
           <img src={portraitSource(portrait.uri)} alt="" />
+          <button type="button" className="character-status-button" onClick={(event) => { event.stopPropagation(); onViewStatus(character.id) }} title={`查看${character.name}的状态`} aria-label={`查看${character.name}的状态`}><ClipboardList size={18} /></button>
         </div>
       })}
     </div>
+  )
+}
+
+function CharacterStatusOverlay({ character, onClose }: { character?: CharacterProfile; onClose: () => void }) {
+  if (!character) return null
+  const status = character.statusBar?.trim()
+  return (
+    <button type="button" className="character-status-overlay" onClick={(event) => { event.stopPropagation(); onClose() }} aria-label={`关闭${character.name}的状态栏`}>
+      <section className="character-status-window" style={{ borderColor: character.color }} aria-label={`${character.name}的状态栏`}>
+        <header><span className="character-status-icon" style={{ color: character.color }}><ClipboardList size={19} /></span><strong style={{ color: character.color }}>{character.name}</strong><span>状态</span></header>
+        {status ? <div className="character-status-content">{status}</div> : <div className="character-status-empty">暂无状态记录</div>}
+      </section>
+    </button>
   )
 }
 

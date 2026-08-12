@@ -110,6 +110,17 @@ describe('parseAssistantResponse', () => {
     expect(parsed.segments[0]).toMatchObject({ type: 'dialogue', expression: '羞涩、担忧' })
   })
 
+  it('maps the reported present characters from the RPG state to character IDs', () => {
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；章节：测试；场景：延续；在场人物：维纳斯、主角\n[旁白] 门在身后关上。', {
+      characters: [
+        { id: 'player', name: '主角', role: 'player' },
+        { id: 'venus', name: '维纳斯', role: 'npc' },
+      ],
+    })
+
+    expect(parsed.gameData?.statePatch).toMatchObject({ presentCharacterIds: ['venus', 'player'] })
+  })
+
   it('extracts character status lines, filters unknown names, and keeps the last update', () => {
     const parsed = parseAssistantResponse([
       '[状态] 模式：常规；地点：旅店；时间：夜晚；章节：；场景：延续',

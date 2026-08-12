@@ -5,8 +5,8 @@ function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabl
   const normalStates = collectPortraitStates(characters, 'normal')
   const nsfwStates = nsfwEnabled ? collectPortraitStates(characters, 'nsfw') : []
   const stateLine = nsfwEnabled
-    ? '“[状态] 模式：常规；地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续”'
-    : '“[状态] 地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续”'
+    ? '“[状态] 模式：常规；地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续；在场人物：角色姓名列表”'
+    : '“[状态] 地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续；在场人物：角色姓名列表”'
   const expressionRules = nsfwEnabled
     ? `   状态基于当前故事模式（“常规”或“NSFW”）选择。
    常规模式状态包括：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。
@@ -17,7 +17,7 @@ function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabl
 剧情内容只输出一次，不要输出 JSON、Markdown 代码块、XML 标签或 <game-data>。
 
 每个展示片段独占一行，只允许以下${statusRulesEnabled ? '五' : '四'}种行：
-1. RPG 状态：每次回复第一行必须写成${stateLine}，场景发生变化时末项写“切换”。引子或章节间过渡内容的章节名留空，写成“章节：；”。
+1. RPG 状态：每次回复第一行必须写成${stateLine}。场景发生变化时“场景”写“切换”，否则写“延续”；“在场人物”必须列出当前场景中仍在现场的所有已登场角色姓名，角色离场后不得继续列出。引子或章节间过渡内容的章节名留空，写成“章节：；”。
 2. 旁白：严格写成“[旁白] 叙述文字”。
 3. 人物台词：严格写成“人物姓名（状态）：台词”，例如“维纳斯（开心）：今晚就留下来吧。”
 ${expressionRules}
@@ -74,6 +74,9 @@ export function buildSystemPrompt(
   const extraStateValues = Object.entries(game.gameState.values ?? {})
     .map(([key, value]) => `- ${key}：${String(value)}`)
     .join('\n')
+  const presentCharacters = game.gameState.presentCharacterIds
+    ?.flatMap((id) => game.characters.find((character) => character.id === id)?.name ?? [])
+    .join('、')
 
   return `${highestRules}${buildRpgSystemRules(game.nsfwEnabled, newStoryChoiceCount)}
 
@@ -95,6 +98,7 @@ ${characterBlock}
 ## 当前 RPG 状态
 ${game.nsfwEnabled ? `- 内容模式：${game.gameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}\n` : ''}- 地点：${game.gameState.location}
 - 时间：${game.gameState.time}
+- 在场人物：${presentCharacters || '尚未明确'}
 ${extraStateValues || '- 其他状态：无'}
 
 ## 当前章节
