@@ -28,3 +28,8 @@ RPGBox 支持 OpenAI 兼容接口。在全局设置中添加 Base URL、API Key 
 ## 许可证
 
 项目代码使用 [GPL-3.0-only](LICENSE) 许可证。
+
+## 界面截图
+<img width="1440" height="3120" alt="8fc5246bdb3c93a175a0a0edd2655fbf" src="https://github.com/user-attachments/assets/0d03d5df-67d6-4a03-adab-b66e0bd4d9cd" />
+<img width="1440" height="3120" alt="d03c8d6d4e84cc95cf04d37952c9d7b2" src="https://github.com/user-attachments/assets/63a2f7a4-bd7a-449a-9c4b-db4a1a25539e" />
+<img width="1280" height="2773" alt="171b7373e757e5bfd8e6cd06d302f1c3" src="https://github.com/user-attachments/assets/f6d2be14-e445-438f-b24d-3a19388bc699" />
