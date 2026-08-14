@@ -16,7 +16,7 @@ export interface RpgExportOptions {
 export type RpgboxImportSource = File
 
 export interface RpgboxImportOptions {
-  skipPortraits?: boolean
+  onPortraitProgress?: (completed: number, total: number) => void
 }
 
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
@@ -117,7 +117,8 @@ async function writeZipInChunks(zip: JSZip, path: string): Promise<void> {
 export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession, options: RpgboxImportOptions = {}): Promise<GameSession> {
   const fileName = source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
-  const zip = await JSZip.loadAsync(await source.arrayBuffer())
+  const zipInput = typeof window === 'undefined' ? await source.arrayBuffer() : source
+  const zip = await JSZip.loadAsync(zipInput)
   const xmlFile = zip.file('rpg.xml')
   if (!xmlFile) throw new Error('RPGBox 文件缺少 rpg.xml')
   const sections = parseRpgboxXml(await xmlFile.async('string'))
@@ -127,17 +128,19 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
   if (sections.nsfw) game.nsfwScenePrompt = sections.nsfw.nsfwScenePrompt ?? ''
   if (sections.characters) {
     const characters: CharacterProfile[] = []
+    const portraitTotal = sections.characters.reduce((count, character) => count + (character.portraits?.length ?? 0), 0)
+    let portraitCompleted = 0
     for (const character of sections.characters) {
       const portraits: CharacterProfile['portraits'] = []
       for (const portrait of character.portraits ?? []) {
         if (!portrait.assetPath.startsWith('portraits/') || portrait.assetPath.includes('..')) continue
         const { assetPath, ...metadata } = portrait
-        if (!options.skipPortraits) {
-          const asset = zip.file(portrait.assetPath)
-          if (!asset) continue
-          const uri = await savePortraitBase64(baseGame.id, character.id, await asset.async('base64'), fileExtension(assetPath))
-          portraits.push({ ...metadata, uri })
-        }
+        const asset = zip.file(portrait.assetPath)
+        if (!asset) continue
+        const uri = await savePortraitBase64(baseGame.id, character.id, await asset.async('base64'), fileExtension(assetPath))
+        portraits.push({ ...metadata, uri })
+        portraitCompleted += 1
+        options.onPortraitProgress?.(portraitCompleted, portraitTotal)
       }
       const { nsfwDescription: _legacyNsfwDescription, ...shareableCharacter } = character as SerializedCharacter & { nsfwDescription?: string }
       characters.push({
@@ -145,7 +148,6 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
         nsfwDescription: '',
         statusBar: shareableCharacter.statusBar ?? '',
         portraits,
-        ...(options.skipPortraits ? { defaultPortraitId: undefined, defaultPortraitIds: {} } : {}),
       })
     }
     if (characters.length) game.characters = characters
