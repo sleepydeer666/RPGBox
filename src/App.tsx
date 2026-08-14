@@ -195,8 +195,8 @@ function App() {
       const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
       const importedKeys = saved.bundledRpgImportKeys ?? []
       setBundledImportStatus({ active: true, current: '', index: 0, total: 0 })
-      const bundledPackages = await loadBundledRpgs(provider, (current, index, total) => {
-        setBundledImportStatus({ active: true, current, index, total })
+      const bundledPackages = await loadBundledRpgs(provider, (current, index, total, detail) => {
+        setBundledImportStatus({ active: true, current: detail ? `${current} · ${detail}` : current, index, total })
       })
       const newPackages = bundledPackages.filter((item) => !importedKeys.includes(item.key))
       const nextImportedKeys = Array.from(new Set([...importedKeys, ...bundledPackages.map((item) => item.key)]))
