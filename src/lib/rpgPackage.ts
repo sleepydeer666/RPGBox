@@ -15,6 +15,10 @@ export interface RpgExportOptions {
 
 export type RpgboxImportSource = File
 
+export interface RpgboxImportOptions {
+  skipPortraits?: boolean
+}
+
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
   assetPath: string
 }
@@ -110,7 +114,7 @@ async function writeZipInChunks(zip: JSZip, path: string): Promise<void> {
   })
 }
 
-export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession): Promise<GameSession> {
+export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession, options: RpgboxImportOptions = {}): Promise<GameSession> {
   const fileName = source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
   const zip = await JSZip.loadAsync(await source.arrayBuffer())
@@ -127,14 +131,22 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
       const portraits: CharacterProfile['portraits'] = []
       for (const portrait of character.portraits ?? []) {
         if (!portrait.assetPath.startsWith('portraits/') || portrait.assetPath.includes('..')) continue
-        const asset = zip.file(portrait.assetPath)
-        if (!asset) continue
         const { assetPath, ...metadata } = portrait
-        const uri = await savePortraitBase64(baseGame.id, character.id, await asset.async('base64'), fileExtension(assetPath))
-        portraits.push({ ...metadata, uri })
+        if (!options.skipPortraits) {
+          const asset = zip.file(portrait.assetPath)
+          if (!asset) continue
+          const uri = await savePortraitBase64(baseGame.id, character.id, await asset.async('base64'), fileExtension(assetPath))
+          portraits.push({ ...metadata, uri })
+        }
       }
       const { nsfwDescription: _legacyNsfwDescription, ...shareableCharacter } = character as SerializedCharacter & { nsfwDescription?: string }
-      characters.push({ ...shareableCharacter, nsfwDescription: '', statusBar: shareableCharacter.statusBar ?? '', portraits })
+      characters.push({
+        ...shareableCharacter,
+        nsfwDescription: '',
+        statusBar: shareableCharacter.statusBar ?? '',
+        portraits,
+        ...(options.skipPortraits ? { defaultPortraitId: undefined, defaultPortraitIds: {} } : {}),
+      })
     }
     if (characters.length) game.characters = characters
   }

@@ -1,4 +1,5 @@
 import { createBlankGame } from '../game'
+import { Capacitor } from '@capacitor/core'
 import type { GameSession, ProviderProfile } from '../types'
 import { importRpgbox } from './rpgPackage'
 
@@ -26,7 +27,7 @@ export async function loadBundledRpgs(provider?: ProviderProfile, onProgress?: (
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const file = new File([await response.blob()], fileName)
       const blank = createBlankGame(packages.length + 1, provider)
-      const imported = await importRpgbox(file, blank)
+      const imported = await importRpgbox(file, blank, { skipPortraits: Capacitor.isNativePlatform() })
       packages.push({
         key: `file:${fileName}`,
         fileName,
