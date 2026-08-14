@@ -2,15 +2,21 @@ import { createBlankGame } from '../game'
 import type { GameSession, ProviderProfile } from '../types'
 import { importRpgbox } from './rpgPackage'
 
+export interface BundledRpgPackage {
+  key: string
+  fileName: string
+  game: GameSession
+}
+
 const bundledRpgUrls = import.meta.glob('../assets/default-rpg/*.rpgbox', {
   eager: true,
   import: 'default',
   query: '?url',
 }) as Record<string, string>
 
-export async function loadBundledRpgs(provider?: ProviderProfile): Promise<GameSession[]> {
+export async function loadBundledRpgs(provider?: ProviderProfile): Promise<BundledRpgPackage[]> {
   const entries = Object.entries(bundledRpgUrls).sort(([left], [right]) => left.localeCompare(right))
-  const games: GameSession[] = []
+  const packages: BundledRpgPackage[] = []
 
   for (const [path, url] of entries) {
     try {
@@ -18,16 +24,20 @@ export async function loadBundledRpgs(provider?: ProviderProfile): Promise<GameS
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const fileName = path.split('/').at(-1) ?? 'default.rpgbox'
       const file = new File([await response.blob()], fileName)
-      const blank = createBlankGame(games.length + 1, provider)
+      const blank = createBlankGame(packages.length + 1, provider)
       const imported = await importRpgbox(file, blank)
-      games.push({
-        ...imported,
-        title: fileName.replace(/_v\d+\.rpgbox$/iu, '').replace(/\.rpgbox$/iu, ''),
+      packages.push({
+        key: `file:${fileName}`,
+        fileName,
+        game: {
+          ...imported,
+          title: fileName.replace(/_v\d+\.rpgbox$/iu, '').replace(/\.rpgbox$/iu, ''),
+        },
       })
     } catch (error) {
       console.error(`Failed to load bundled RPG: ${path}`, error)
     }
   }
 
-  return games
+  return packages
 }

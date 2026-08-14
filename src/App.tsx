@@ -54,6 +54,7 @@ function App() {
   const [bundledDefaultPrompt, setBundledDefaultPrompt] = useState('')
   const [games, setGames] = useState<GameSession[]>([initialGame])
   const [activeGameId, setActiveGameId] = useState(initialGame.id)
+  const [bundledRpgImportKeys, setBundledRpgImportKeys] = useState<string[]>([])
   const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({ [initialGame.id]: 0 })
   const [selectedChoices, setSelectedChoices] = useState<string[]>([])
   const [customInput, setCustomInput] = useState('')
@@ -190,16 +191,19 @@ function App() {
       if (saved.providers?.length) setProviders(saved.providers)
       if (saved.activeProviderId) setActiveProviderId(saved.activeProviderId)
       if (saved.globalJailbreakPrompt) setGlobalJailbreakPrompt(saved.globalJailbreakPrompt)
+      const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
+      const importedKeys = saved.bundledRpgImportKeys ?? []
+      const bundledPackages = await loadBundledRpgs(provider)
+      const newPackages = bundledPackages.filter((item) => !importedKeys.includes(item.key))
+      const nextImportedKeys = Array.from(new Set([...importedKeys, ...bundledPackages.map((item) => item.key)]))
+      setBundledRpgImportKeys(nextImportedKeys)
       if (saved.games?.length) {
-        setGames(saved.games)
+        setGames([...saved.games, ...newPackages.map((item) => item.game)])
         if (saved.activeGameId) setActiveGameId(saved.activeGameId)
-      } else {
-        const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
-        const bundledGames = await loadBundledRpgs(provider)
-        if (bundledGames.length) {
-          setGames(bundledGames)
-          setActiveGameId(bundledGames[0].id)
-        }
+      } else if (newPackages.length) {
+        const bundledGames = newPackages.map((item) => item.game)
+        setGames(bundledGames)
+        setActiveGameId(bundledGames[0].id)
       }
       setHydrated(true)
     })
@@ -207,9 +211,9 @@ function App() {
 
   useEffect(() => {
     if (!hydrated) return
-    const timer = window.setTimeout(() => void saveState({ providers, activeProviderId, globalJailbreakPrompt, games, activeGameId }), 250)
+    const timer = window.setTimeout(() => void saveState({ providers, activeProviderId, globalJailbreakPrompt, games, activeGameId, bundledRpgImportKeys }), 250)
     return () => window.clearTimeout(timer)
-  }, [activeGameId, activeProviderId, games, globalJailbreakPrompt, hydrated, providers])
+  }, [activeGameId, activeProviderId, bundledRpgImportKeys, games, globalJailbreakPrompt, hydrated, providers])
 
   useEffect(() => {
     setViewedStatusCharacterId(null)

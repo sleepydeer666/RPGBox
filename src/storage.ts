@@ -14,6 +14,7 @@ export interface PersistedState {
   globalJailbreakPrompt: string
   games: GameSession[]
   activeGameId: string
+  bundledRpgImportKeys: string[]
 }
 
 interface LegacyState {
@@ -137,6 +138,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       globalJailbreakPrompt: parsed.globalJailbreakPrompt ?? '',
       games: parsed.games,
       activeGameId: parsed.activeGameId,
+      bundledRpgImportKeys: parsed.bundledRpgImportKeys ?? [],
     }
   } catch {
     return {}
