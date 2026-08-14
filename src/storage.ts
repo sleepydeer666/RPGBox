@@ -43,36 +43,6 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       }))
     }
     const fallbackProvider = parsed.providers?.find((provider) => provider.id === parsed.activeProviderId) ?? parsed.providers?.[0]
-    if (!parsed.games?.length) {
-      const gameId = 'game-rainy-night'
-      parsed.games = [{
-        id: gameId,
-        title: '雨夜来客',
-        note: '',
-        nsfwEnabled: true,
-        newStoryChoiceCount: 4,
-        systemPrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-        aiSettings: createDefaultAiSettings(fallbackProvider),
-        storyStylePrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-        chapterTransitionRules: '',
-        recommendedChapterTurnsEnabled: false,
-        recommendedChapterTurns: 20,
-        statusRulesPrompt: '',
-        nsfwScenePrompt: '',
-        worldSettingPrompt: '',
-        characters: createDefaultCharacters(parsed.gameState?.focusCharacter),
-        messages: (parsed.messages ?? []).map((message) =>
-          message.id === 'opening' && !message.content.includes('"segments"')
-            ? { ...message, content: OPENING_MESSAGE }
-            : message,
-        ),
-        gameState: { location: parsed.gameState?.location ?? '未知', time: parsed.gameState?.time ?? '未知', contentMode: parsed.gameState?.contentMode ?? 'normal', values: parsed.gameState?.values ?? {}, presentCharacterIds: parsed.gameState?.presentCharacterIds },
-        narrative: createDefaultNarrative('雨夜来客', '', (parsed.messages ?? [])[0]?.id ?? ''),
-        memory: normalizeMemoryState({ historicalSummary: parsed.memory?.summary ?? '' }),
-        updatedAt: Date.now(),
-      }]
-      parsed.activeGameId = gameId
-    }
     parsed.games = (parsed.games ?? []).map((game) => {
       const legacy = game as GameSession & {
         chapter?: string
@@ -130,7 +100,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       })),
     })})
     if (!parsed.activeGameId || !parsed.games.some((game) => game.id === parsed.activeGameId)) {
-      parsed.activeGameId = parsed.games[0].id
+      parsed.activeGameId = parsed.games[0]?.id ?? ''
     }
     return {
       providers: parsed.providers,

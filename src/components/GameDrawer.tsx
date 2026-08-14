@@ -8,7 +8,7 @@ const REPOSITORY_URL = 'https://github.com/sleepydeer666/RPGBox'
 const MARQUEE_CHARACTERS_PER_SECOND = 2 / 3
 const MARQUEE_ENDPOINT_PAUSE_MS = 1000
 
-interface GameDrawerProps {
+export interface GameDrawerProps {
   open: boolean
   games: GameSession[]
   activeGameId: string
@@ -79,7 +79,7 @@ export default function GameDrawer(props: GameDrawerProps) {
   }
 
   async function deleteGame(game: GameSession) {
-    const lastHint = props.games.length === 1 ? ' 删除后会自动建立一个空白 RPG。' : ''
+    const lastHint = props.games.length === 1 ? ' 删除后 RPG 列表将为空。' : ''
     if (!window.confirm(`确认删除“${game.title}”？该 RPG 的剧情、记忆、角色和立绘都会被永久删除。${lastHint}`)) return
     setWorking(true)
     setActionError('')

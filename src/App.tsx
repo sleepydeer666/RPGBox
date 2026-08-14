@@ -1,9 +1,9 @@
-import { AlertTriangle, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, MapPin, Menu, RefreshCw, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
+import { AlertTriangle, BookOpen, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, MapPin, Menu, RefreshCw, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import GameDrawer from './components/GameDrawer'
+import GameDrawer, { type GameDrawerProps } from './components/GameDrawer'
 import GameSettingsDialog from './components/GameSettingsDialog'
 import GlobalSettingsDialog from './components/GlobalSettingsDialog'
-import { createBlankGame, createInitialGame } from './game'
+import { createBlankGame } from './game'
 import { tokenizeCharacterNames, tokenizeNarrationText } from './lib/characterText'
 import { buildTurnInstructions, chapterTurnCountBeforeLatestBoundary, currentChapterTurnCount, reportedChapterTitle, selectedChoiceEndsChapter } from './lib/chapterTurns'
 import { loadBundledDefaultPrompt, resolveGlobalJailbreakPrompt } from './lib/defaultPrompt'
@@ -47,15 +47,15 @@ function formatMemorySummaryDebug(
 
 function App() {
   const defaults = createInitialProviderState()
-  const initialGame = createInitialGame()
+  const fallbackGame = useMemo(() => createBlankGame(1), [])
   const [providers, setProviders] = useState<ProviderProfile[]>(defaults.providers)
   const [activeProviderId, setActiveProviderId] = useState(defaults.activeProviderId)
   const [globalJailbreakPrompt, setGlobalJailbreakPrompt] = useState('')
   const [bundledDefaultPrompt, setBundledDefaultPrompt] = useState('')
-  const [games, setGames] = useState<GameSession[]>([initialGame])
-  const [activeGameId, setActiveGameId] = useState(initialGame.id)
+  const [games, setGames] = useState<GameSession[]>([])
+  const [activeGameId, setActiveGameId] = useState('')
   const [bundledRpgImportKeys, setBundledRpgImportKeys] = useState<string[]>([])
-  const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({ [initialGame.id]: 0 })
+  const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({})
   const [selectedChoices, setSelectedChoices] = useState<string[]>([])
   const [customInput, setCustomInput] = useState('')
   const [gameDrawerOpen, setGameDrawerOpen] = useState(false)
@@ -71,9 +71,10 @@ function App() {
   const [summarizingMemory, setSummarizingMemory] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [hydrated, setHydrated] = useState(false)
+  const [bundledImportStatus, setBundledImportStatus] = useState({ active: true, current: '', index: 0, total: 0 })
   const abortRef = useRef<AbortController | null>(null)
 
-  const activeGame = games.find((game) => game.id === activeGameId) ?? games[0]
+  const activeGame = games.find((game) => game.id === activeGameId) ?? games[0] ?? fallbackGame
   const configuredProvider = providers.find((provider) => provider.id === activeGame.aiSettings.providerId) ?? providers[0]
   const activeProvider = configuredProvider ? {
     ...configuredProvider,
@@ -193,7 +194,10 @@ function App() {
       if (saved.globalJailbreakPrompt) setGlobalJailbreakPrompt(saved.globalJailbreakPrompt)
       const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
       const importedKeys = saved.bundledRpgImportKeys ?? []
-      const bundledPackages = await loadBundledRpgs(provider)
+      setBundledImportStatus({ active: true, current: '', index: 0, total: 0 })
+      const bundledPackages = await loadBundledRpgs(provider, (current, index, total) => {
+        setBundledImportStatus({ active: true, current, index, total })
+      })
       const newPackages = bundledPackages.filter((item) => !importedKeys.includes(item.key))
       const nextImportedKeys = Array.from(new Set([...importedKeys, ...bundledPackages.map((item) => item.key)]))
       setBundledRpgImportKeys(nextImportedKeys)
@@ -205,6 +209,7 @@ function App() {
         setGames(bundledGames)
         setActiveGameId(bundledGames[0].id)
       }
+      setBundledImportStatus((current) => ({ ...current, active: false }))
       setHydrated(true)
     })
   }, [])
@@ -275,10 +280,9 @@ function App() {
     if (!target) return
     await Promise.all(target.characters.flatMap((character) => character.portraits.map((portrait) => deletePortraitFile(portrait.uri))))
     const remaining = games.filter((game) => game.id !== gameId)
-    const nextGames = remaining.length ? remaining : [createBlankGame(1, configuredProvider)]
-    setGames(nextGames)
+    setGames(remaining)
     if (activeGameId === gameId) {
-      setActiveGameId(nextGames[0].id)
+      setActiveGameId(remaining[0]?.id ?? '')
       setSelectedChoices([])
       setCustomInput('')
     }
@@ -776,6 +780,24 @@ function App() {
     }
   }
 
+  if (!hydrated || games.length === 0) {
+    const drawerProps: GameDrawerProps = {
+      open: gameDrawerOpen,
+      games,
+      activeGameId,
+      onClose: () => setGameDrawerOpen(false),
+      onSelect: selectGame,
+      onReorder: reorderGames,
+      onCreate: createGame,
+      onUpdateMetadata: updateRpgMetadata,
+      onDelete: deleteGame,
+      onClone: cloneGame,
+      onExport: exportGame,
+      onOpenSettings: () => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) },
+    }
+    return <><EmptyLibraryScreen loading={!hydrated} importStatus={bundledImportStatus} onOpenLibrary={() => setGameDrawerOpen(true)} drawerProps={drawerProps} />{globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}</>
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -847,6 +869,46 @@ function App() {
       {debugOpen && <RawResponseDialog requestContent={debugExchange.requestContent} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryContent={debugExchange.memorySummaryContent} onClose={() => setDebugOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} onSummarize={summarizeMemoryNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
+    </div>
+  )
+}
+
+function EmptyLibraryScreen({ loading, importStatus, onOpenLibrary, drawerProps }: {
+  loading: boolean
+  importStatus: { active: boolean; current: string; index: number; total: number }
+  onOpenLibrary: () => void
+  drawerProps: GameDrawerProps
+}) {
+  const currentName = importStatus.current.replace(/\.rpgbox$/iu, '')
+  const progress = importStatus.total ? Math.round(importStatus.index / importStatus.total * 100) : 0
+
+  return (
+    <div className="app-shell empty-library-shell">
+      <header className="topbar">
+        <button className="icon-button" onClick={onOpenLibrary} title="RPG目录"><Menu size={21} /></button>
+        <div className="brand-block"><span className="brand">RPGBox</span><span className="chapter">RPG 目录</span></div>
+      </header>
+      <main className="empty-library-main">
+        {loading ? (
+          <section className="library-state" aria-live="polite">
+            <RefreshCw className="library-state-spinner" size={28} aria-hidden="true" />
+            <h1>正在导入预设 RPG，请稍候</h1>
+            <p>{currentName || '正在检查预设 RPG'}</p>
+            {importStatus.total > 0 && <>
+              <div className="library-import-progress" aria-label={`导入进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
+              <small>{importStatus.index} / {importStatus.total}</small>
+            </>}
+          </section>
+        ) : (
+          <section className="library-state">
+            <BookOpen size={30} aria-hidden="true" />
+            <h1>尚未创建 RPG</h1>
+            <p>请创建或导入 RPG</p>
+            <button type="button" className="primary-button" onClick={onOpenLibrary}><Menu size={17} />打开 RPG 目录</button>
+          </section>
+        )}
+      </main>
+      <GameDrawer {...drawerProps} />
     </div>
   )
 }

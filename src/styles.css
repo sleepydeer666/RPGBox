@@ -1548,6 +1548,76 @@ textarea:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.empty-library-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.empty-library-main {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px 20px calc(28px + env(safe-area-inset-bottom));
+  background: #111210;
+}
+
+.library-state {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: #b9bcb3;
+}
+
+.library-state > svg {
+  color: var(--gold);
+}
+
+.library-state h1 {
+  margin: 16px 0 6px;
+  color: #ecece6;
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.library-state p {
+  max-width: 100%;
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.library-state small {
+  margin-top: 8px;
+  color: #777b72;
+  font-size: 11px;
+}
+
+.library-state-spinner {
+  animation: library-spin 1s linear infinite;
+}
+
+.library-import-progress {
+  width: min(320px, 100%);
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #292b27;
+}
+
+.library-import-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gold);
+  transition: width 180ms ease;
+}
+
+@keyframes library-spin {
+  to { transform: rotate(360deg); }
+}
+
 .start-game-button {
   width: 100%;
   min-height: 46px;

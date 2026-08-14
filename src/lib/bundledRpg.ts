@@ -14,15 +14,16 @@ const bundledRpgUrls = import.meta.glob('../assets/default-rpg/*.rpgbox', {
   query: '?url',
 }) as Record<string, string>
 
-export async function loadBundledRpgs(provider?: ProviderProfile): Promise<BundledRpgPackage[]> {
+export async function loadBundledRpgs(provider?: ProviderProfile, onProgress?: (fileName: string, index: number, total: number) => void): Promise<BundledRpgPackage[]> {
   const entries = Object.entries(bundledRpgUrls).sort(([left], [right]) => left.localeCompare(right))
   const packages: BundledRpgPackage[] = []
 
-  for (const [path, url] of entries) {
+  for (const [index, [path, url]] of entries.entries()) {
     try {
+      const fileName = path.split('/').at(-1) ?? 'default.rpgbox'
+      onProgress?.(fileName, index + 1, entries.length)
       const response = await fetch(url)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const fileName = path.split('/').at(-1) ?? 'default.rpgbox'
       const file = new File([await response.blob()], fileName)
       const blank = createBlankGame(packages.length + 1, provider)
       const imported = await importRpgbox(file, blank)

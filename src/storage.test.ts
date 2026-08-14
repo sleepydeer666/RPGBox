@@ -21,6 +21,16 @@ describe('RPG NSFW setting migration', () => {
     expect(createBlankGame(1).nsfwEnabled).toBe(false)
   })
 
+  it('keeps an empty library empty instead of restoring the sample RPG', async () => {
+    preferenceMocks.get.mockResolvedValue({
+      value: JSON.stringify({ games: [], activeGameId: '' }),
+    })
+
+    const loaded = await loadState()
+    expect(loaded.games).toEqual([])
+    expect(loaded.activeGameId).toBe('')
+  })
+
   it('keeps legacy RPG behavior enabled when the saved flag is absent', async () => {
     const legacy = createBlankGame(1) as Partial<ReturnType<typeof createBlankGame>>
     delete legacy.nsfwEnabled
