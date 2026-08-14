@@ -13,7 +13,7 @@ export const DEFAULT_PROVIDER: ProviderProfile = {
   apiKey: '',
   model: 'gpt-4o-mini',
   models: ['gpt-4o-mini'],
-  temperature: 0.9,
+  temperature: 0.5,
   topP: 1,
   presencePenalty: 0,
   frequencyPenalty: 0,

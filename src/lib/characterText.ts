@@ -23,10 +23,16 @@ export function tokenizeNarrationText(
   text: string,
   characters: Pick<CharacterProfile, 'id' | 'name' | 'color' | 'role'>[],
 ): CharacterTextToken[] {
-  const playerId = characters.find((character) => character.role === 'player')?.id
-  return tokenizeCharacterNames(text, characters).map((token) =>
-    token.character?.id === playerId ? { ...token, text: '你' } : token,
-  )
+  const player = characters.find((character) => character.role === 'player')
+  if (!player) return tokenizeCharacterNames(text, characters)
+
+  return tokenizeCharacterNames(text, characters).flatMap((token) => {
+    if (token.character?.id === player.id) return [{ ...token, text: '你' }]
+    if (token.character || !token.text.includes('你')) return [token]
+    return token.text.split(/(你)/g).filter(Boolean).map((part) =>
+      part === '你' ? { text: part, character: player } : { text: part },
+    )
+  })
 }
 
 function escapeRegExp(value: string): string {

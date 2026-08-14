@@ -7,6 +7,7 @@ const filesystemMocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  appendFile: vi.fn(),
 }))
 
 vi.mock('@capacitor/filesystem', () => ({
@@ -19,6 +20,7 @@ describe('RPGBox XML manifest', () => {
     filesystemMocks.mkdir.mockReset().mockResolvedValue(undefined)
     filesystemMocks.readFile.mockReset().mockResolvedValue({ data: 'aW1hZ2U=' })
     filesystemMocks.writeFile.mockReset().mockResolvedValue({ uri: 'file:///export.rpgbox' })
+    filesystemMocks.appendFile.mockReset().mockResolvedValue(undefined)
   })
 
   it('round-trips selected package sections and escapes the title', () => {
@@ -49,7 +51,7 @@ describe('RPGBox XML manifest', () => {
     await exportRpgbox(game, { settings: true, characters: false, nsfw: false })
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
-    const zip = await JSZip.loadAsync(write.data, { base64: true })
+    const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
     const xml = await zip.file('rpg.xml')!.async('string')
     const sections = parseRpgboxXml(xml)
     expect(sections.settings).not.toHaveProperty('aiSettings')
@@ -71,7 +73,7 @@ describe('RPGBox XML manifest', () => {
     await exportRpgbox(game, { settings: false, characters: true, nsfw: false })
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
-    const zip = await JSZip.loadAsync(write.data, { base64: true })
+    const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
     const xml = await zip.file('rpg.xml')!.async('string')
     const sections = parseRpgboxXml(xml)
     expect(sections.characters?.[0]).not.toHaveProperty('nsfwDescription')

@@ -26,6 +26,7 @@ export function currentChapterSummary(memory: MemoryState): string {
 
 export function formatRecentChapterMemories(memory: MemoryState): string {
   const completed = recentChapterMemories(memory)
+    .filter((chapter) => chapter.summary.trim())
     .map((chapter) => `### ${chapter.title}\n${chapter.summary}`)
     .join('\n\n')
   const current = currentChapterSummary(memory).trim()

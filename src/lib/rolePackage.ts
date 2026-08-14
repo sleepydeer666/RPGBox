@@ -6,7 +6,7 @@ import { readPortraitBase64, savePortraitBase64 } from './portraits'
 export const ROLE_PACKAGE_DIRECTORY = 'RPGBox'
 export const ROLE_PACKAGE_DIRECTORY_LABEL = '内部存储/Documents/RPGBox'
 
-export type RolePackageImportSource = string | File
+export type RolePackageImportSource = File
 
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
   assetPath: string
@@ -14,15 +14,6 @@ interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number],
 
 interface SerializedRole extends Omit<CharacterProfile, 'portraits'> {
   portraits: SerializedPortrait[]
-}
-
-export async function listRolePackageFiles(): Promise<string[]> {
-  await ensureDirectory()
-  const result = await Filesystem.readdir({ path: ROLE_PACKAGE_DIRECTORY, directory: Directory.Documents })
-  return result.files
-    .filter((file) => file.type === 'file' && file.name.toLocaleLowerCase().endsWith('.role.rpgbox'))
-    .map((file) => file.name)
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
 }
 
 export async function exportRolePackage(character: CharacterProfile, includeNsfw: boolean): Promise<string> {
@@ -58,11 +49,9 @@ export async function exportRolePackage(character: CharacterProfile, includeNsfw
 }
 
 export async function importRolePackage(source: RolePackageImportSource, gameId: string, characterId: string): Promise<CharacterProfile> {
-  const fileName = typeof source === 'string' ? source : source.name
+  const fileName = source.name
   if (!/^[^/\\]+\.role\.rpgbox$/iu.test(fileName)) throw new Error('无效的角色包文件名')
-  const zip = typeof source === 'string'
-    ? await loadFilesystemZip(`${ROLE_PACKAGE_DIRECTORY}/${fileName}`)
-    : await JSZip.loadAsync(await source.arrayBuffer())
+  const zip = await JSZip.loadAsync(await source.arrayBuffer())
   const xmlFile = zip.file('role.xml')
   if (!xmlFile) throw new Error('角色包缺少 role.xml')
   const serialized = parseRoleXml(await xmlFile.async('string'))
@@ -86,12 +75,6 @@ export async function importRolePackage(source: RolePackageImportSource, gameId:
     defaultPortraitId: portraitIds.has(serialized.defaultPortraitId ?? '') ? serialized.defaultPortraitId : undefined,
     defaultPortraitIds: Object.fromEntries(Object.entries(serialized.defaultPortraitIds ?? {}).filter(([, id]) => portraitIds.has(id ?? ''))),
   }
-}
-
-async function loadFilesystemZip(path: string) {
-  const file = await Filesystem.readFile({ path, directory: Directory.Documents })
-  const base64 = typeof file.data === 'string' ? file.data : await blobToBase64(file.data)
-  return JSZip.loadAsync(base64, { base64: true })
 }
 
 export function createRoleXml(role: SerializedRole): string {
@@ -146,15 +129,4 @@ function fileExtension(path: string): string {
 
 function fileStamp(): string {
   return new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, '').replace('T', '-')
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => typeof reader.result === 'string'
-      ? resolve(reader.result.slice(reader.result.indexOf(',') + 1))
-      : reject(new Error('无法读取角色包'))
-    reader.onerror = () => reject(reader.error ?? new Error('无法读取角色包'))
-    reader.readAsDataURL(blob)
-  })
 }

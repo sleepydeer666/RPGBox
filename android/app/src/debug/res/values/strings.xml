@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RPGBox Debug</string>
+    <string name="title_activity_main">RPGBox Debug</string>
+    <string name="package_name">app.rpgbox.mobile.debug</string>
+    <string name="custom_url_scheme">app.rpgbox.mobile.debug</string>
+</resources>

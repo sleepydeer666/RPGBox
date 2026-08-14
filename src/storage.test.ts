@@ -31,6 +31,9 @@ describe('RPG NSFW setting migration', () => {
     const loaded = await loadState()
     expect(loaded.games?.[0].nsfwEnabled).toBe(true)
     expect(loaded.games?.[0].newStoryChoiceCount).toBe(4)
+    expect(loaded.games?.[0].chapterTransitionRules).toBe('')
+    expect(loaded.games?.[0].recommendedChapterTurnsEnabled).toBe(false)
+    expect(loaded.games?.[0].recommendedChapterTurns).toBe(20)
   })
 
   it('preserves an explicitly disabled saved RPG', async () => {

@@ -12,7 +12,7 @@ const STATUS_LINE_PATTERN = /^\s*\[状态\]\s*(.*?)\s*$/iu
 const STATUS_FIELD_PATTERN = /(?:^|[；;|｜])\s*(模式|地点|时间|章节|场景|在场人物|在场角色)\s*[：:]\s*([^；;|｜]*)/giu
 const CHARACTER_STATUS_LINE_PATTERN = /^\s*\[([^\]\n]{1,30})\]\s*状态\s*[：:]\s*(.+?)\s*$/u
 const CHAPTER_START_PATTERN = /^\s*\[篇章开始\]\s*(.+?)\s*$/u
-const CHAPTER_END_PATTERN = /^\s*\[篇章结束\]\s*$/u
+const CHAPTER_END_PATTERN = /^\s*\[(?:篇章|章节)结束\]\s*$/u
 const UNIT_START_PATTERN = /^\s*\[单元开始\]\s*(.+?)\s*$/u
 
 function normalizeChoices(value: unknown): Choice[] {
@@ -94,6 +94,28 @@ function findCharacter(context: ResponseParseContext, suppliedName: string) {
     : undefined
 }
 
+function normalizeMalformedDialogueLine(line: string, context: ResponseParseContext): string {
+  const candidate = line.trim()
+  const wrappedName = candidate.match(/^\[([^\]\n]+)\]([（(][^）)\n]{1,30}[）)]\s*[：:]\s*.+?)$/u)
+  if (wrappedName && findCharacter(context, wrappedName[1].trim())) {
+    return `${wrappedName[1].trim()}${wrappedName[2]}`
+  }
+  const wrappedLine = candidate.match(/^\[([^\n]+)\]$/u)
+  if (wrappedLine) {
+    const dialogue = wrappedLine[1].match(DIALOGUE_LINE_PATTERN)
+    if (dialogue && findCharacter(context, dialogue[1].trim())) return wrappedLine[1].trim()
+  }
+  return line
+}
+
+export function normalizeProtocolResponse(raw: string, context: ResponseParseContext = {}): string {
+  if (!context.characters?.length) return raw
+  const gameData = raw.match(GAME_DATA_PATTERN)?.[0]
+  const story = raw.replace(GAME_DATA_PATTERN, '')
+  const normalized = story.split(/\n/).map((line) => normalizeMalformedDialogueLine(line, context)).join('\n')
+  return `${normalized}${gameData ? `\n${gameData}` : ''}`.trim()
+}
+
 function isProgressLine(line: string): boolean {
   return CHAPTER_START_PATTERN.test(line) || CHAPTER_END_PATTERN.test(line) || UNIT_START_PATTERN.test(line)
 }
@@ -148,10 +170,7 @@ function extractSimpleSegments(story: string, context: ResponseParseContext): St
       continue
     }
     const dialogue = line.match(DIALOGUE_LINE_PATTERN)
-    if (!dialogue) {
-      segments.push({ type: 'narration', text: line })
-      continue
-    }
+    if (!dialogue) continue
     const suppliedName = dialogue[1].trim()
     const character = findCharacter(context, suppliedName)
     segments.push({
@@ -163,6 +182,28 @@ function extractSimpleSegments(story: string, context: ResponseParseContext): St
     })
   }
   return segments
+}
+
+function extractChapterBoundaryIndexes(story: string, context: ResponseParseContext): number[] {
+  const indexes: number[] = []
+  let segmentCount = 0
+  for (const line of story.split(/\n+/).map((text) => text.trim()).filter(Boolean)) {
+    if (CHAPTER_END_PATTERN.test(line)) {
+      if (indexes.at(-1) !== segmentCount) indexes.push(segmentCount)
+      continue
+    }
+    if (NARRATION_LINE_PATTERN.test(line)) {
+      segmentCount += 1
+      continue
+    }
+    const playerDialogue = line.match(PLAYER_DIALOGUE_LINE_PATTERN)
+    if (playerDialogue && context.characters?.some((item) => item.role === 'player')) {
+      segmentCount += 1
+      continue
+    }
+    if (DIALOGUE_LINE_PATTERN.test(line)) segmentCount += 1
+  }
+  return indexes
 }
 
 function normalizeDialogueExpressions(segments: StorySegment[], context: ResponseParseContext, mode: 'normal' | 'nsfw'): StorySegment[] {
@@ -207,7 +248,24 @@ export function visibleStory(raw: string): string {
   return (marker >= 0 ? raw.slice(0, marker) : raw).trim()
 }
 
+export function standardResponse(raw: string, context: ResponseParseContext = {}): string {
+  raw = normalizeProtocolResponse(raw, context)
+  const gameData = raw.match(GAME_DATA_PATTERN)?.[0]
+  const story = raw.replace(GAME_DATA_PATTERN, '')
+  const lines = story.split(/\n+/).map((line) => line.trim()).filter((line) =>
+    Boolean(line)
+    && (CHOICE_LINE_SINGLE_PATTERN.test(line)
+      || isStateLine(line)
+      || isProgressLine(line)
+      || NARRATION_LINE_PATTERN.test(line)
+      || PLAYER_DIALOGUE_LINE_PATTERN.test(line)
+      || DIALOGUE_LINE_PATTERN.test(line)),
+  )
+  return [...lines, ...(gameData ? [gameData] : [])].join('\n').trim()
+}
+
 export function parseAssistantResponse(raw: string, context: ResponseParseContext = {}): ParsedResponse {
+  raw = normalizeProtocolResponse(raw, context)
   const match = raw.match(GAME_DATA_PATTERN)
   let gameData: GameData | null = null
 
@@ -241,6 +299,7 @@ export function parseAssistantResponse(raw: string, context: ResponseParseContex
     ? gameData.segments
     : extractSimpleSegments(story, context)
   const segments = normalizeDialogueExpressions(parsedSegments, context, status?.mode ?? context.contentMode ?? 'normal')
+  const chapterBoundaryIndexes = extractChapterBoundaryIndexes(story, context)
 
   if (!gameData) {
     gameData = { segments, choices, statePatch: deriveStatePatch(story, context), chapterTitle: status?.chapter }
@@ -249,7 +308,7 @@ export function parseAssistantResponse(raw: string, context: ResponseParseContex
     if (status && Object.hasOwn(status, 'chapter')) gameData.chapterTitle = status.chapter
   }
 
-  return { story: storyWithoutFallbackChoices, segments, choices, gameData, sceneChanged, progressEvents, chapterTitle: status?.chapter, characterStatusUpdates }
+  return { story: storyWithoutFallbackChoices, segments, chapterBoundaryIndexes, choices, gameData, sceneChanged, progressEvents, chapterTitle: status?.chapter, characterStatusUpdates }
 }
 
 export function extractTextChoices(text: string): Choice[] {

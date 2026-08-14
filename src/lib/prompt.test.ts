@@ -8,6 +8,7 @@ describe('buildSystemPrompt', () => {
       nsfwEnabled: true,
       newStoryChoiceCount: 7,
       storyStylePrompt: '细腻文风',
+      chapterTransitionRules: '新章节必须从明确事件开始。',
       statusRulesPrompt: '记录服装和情绪，只保留当前状态。',
       nsfwScenePrompt: '成人场景偏好',
       worldSettingPrompt: '架空都市',
@@ -30,6 +31,8 @@ describe('buildSystemPrompt', () => {
     expect(prompt.indexOf('# 系统规则')).toBeLessThan(prompt.indexOf('## 客户端输出协议'))
     expect(prompt.indexOf('## 客户端输出协议')).toBeLessThan(prompt.indexOf('## 章节规则'))
     expect(prompt.indexOf('## 章节规则')).toBeLessThan(prompt.indexOf('## 状态栏规则'))
+    expect(prompt).not.toContain('### 章节切换规则')
+    expect(prompt).not.toContain('新章节必须从明确事件开始。')
     expect(prompt.indexOf('## 状态栏规则')).toBeLessThan(prompt.indexOf('## 剧情规则与文风'))
     expect(prompt).toContain('每轮对话结束后，你需要参考以下规则和目前参与互动角色的状态，以及故事内容，更新角色状态信息。')
     expect(prompt).toContain('[角色名]状态：状态内容')
@@ -37,11 +40,17 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('记录服装和情绪，只保留当前状态。')
     expect(prompt).toContain('你绝对不能扮演用户扮演的角色')
     expect(prompt).toContain('不得替用户决定关键行动、想法、意图或立场')
+    expect(prompt).toContain('旁白中使用“你”来指代用户扮演的角色，不要使用“他”或“她”这样的第三人称。')
+    expect(prompt.indexOf('旁白中使用“你”来指代用户扮演的角色')).toBeLessThan(prompt.indexOf('你最终输出内容的格式也要参考后面的客户端输出协议'))
     expect(prompt).toContain('## 偏好的 NSFW 场景\n成人场景偏好')
     expect(prompt.indexOf('## 偏好的 NSFW 场景')).toBeGreaterThan(prompt.indexOf('## 世界观与故事背景'))
     expect(prompt).not.toContain('❤')
     expect(prompt).toContain('[旁白] 叙述文字')
+    expect(prompt).toContain('2. RPG状态（切换）')
+    expect(prompt).toContain('独立一行“[章节结束]”')
+    expect(prompt).toContain('章节结束边界只使用客户端输出协议规定的“[章节结束]”')
     expect(prompt).toContain('[选项A] 具体行动')
+    expect(prompt).toContain('选项中如果有导致章节结束的选项，后面要标记（结束章节）')
     expect(prompt).toContain('章节：当前活动主题')
     expect(prompt).toContain('在场人物：角色姓名列表')
     expect(prompt).toContain('- 在场人物：主角')
@@ -49,13 +58,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('单元：深夜会面')
     expect(prompt).not.toContain('单元是围绕')
     expect(prompt).toContain('章节切换只用于划分剧情和记忆，不代表世界或人物被重置')
+    expect(prompt).toContain('新章节开始时，必须清除旧章节的出场人物列表，再根据新章节的用户选项重新设置出场人物')
     expect(prompt).toContain('不得自行改写、遗忘或重新生成')
-    expect(prompt).toContain('最后必须输出 4 个')
-    expect(prompt).toContain('用户要求你收尾本段剧情并开启新的剧情')
-    expect(prompt).toContain('进行明确的转场，并开启一段新的剧情引子，同时生成 7 个')
-    expect(prompt).toContain('涵盖不同角色和不同场景、故事大方向')
-    expect(prompt).toContain('依次使用 A 至 G')
-    expect(prompt).toContain('普通剧情续写最后必须输出 4 个')
+    expect(prompt).not.toContain('最后必须输出 4 个')
+    expect(prompt).toContain('本轮用户指令要求结束本章节并开启新章节')
+    expect(prompt).toContain('游戏首次开始时')
+    expect(prompt).toContain('需要建立新的剧情引子')
+    expect(prompt).toContain('涵盖不同角色、不同场景和不同故事大方向')
+    expect(prompt).not.toContain('依次使用 A 至 G')
+    expect(prompt).not.toContain('普通剧情续写最后必须输出 4 个')
+    expect(prompt).not.toContain('生成 7 个')
     expect(prompt).not.toContain('2 至 4 个')
     expect(prompt).toContain('不要输出 JSON')
     expect(prompt).not.toContain('"segments"')

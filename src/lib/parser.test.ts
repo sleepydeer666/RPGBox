@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAssistantResponse, visibleStory } from './parser'
+import { normalizeProtocolResponse, parseAssistantResponse, standardResponse, visibleStory } from './parser'
 
 describe('parseAssistantResponse', () => {
   it('parses the prefixed narration, canonical player dialogue and prefixed choices', () => {
@@ -43,7 +43,7 @@ describe('parseAssistantResponse', () => {
   })
 
   it('parses strict dialogue lines and maps configured character names', () => {
-    const parsed = parseAssistantResponse('夜风掠过窗边。\n维纳斯（开心）：今晚别走。', {
+    const parsed = parseAssistantResponse('[旁白] 夜风掠过窗边。\n维纳斯（开心）：今晚别走。', {
       characters: [{ id: 'venus', name: '维纳斯' }],
     })
 
@@ -51,6 +51,35 @@ describe('parseAssistantResponse', () => {
       { type: 'narration', text: '夜风掠过窗边。' },
       { type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '开心', text: '今晚别走。' },
     ])
+  })
+
+  it('normalizes known character dialogue with brackets around the name', () => {
+    const context = { characters: [{ id: 'player', name: '居眠鹿', role: 'player' as const }] }
+    const raw = '[居眠鹿]（正常）：今晚去酒馆。'
+
+    expect(normalizeProtocolResponse(raw, context)).toBe('居眠鹿（正常）：今晚去酒馆。')
+    expect(standardResponse(raw, context)).toBe('居眠鹿（正常）：今晚去酒馆。')
+    expect(parseAssistantResponse(raw, context).segments[0]).toMatchObject({
+      characterId: 'player', characterName: '居眠鹿', expression: '正常', text: '今晚去酒馆。',
+    })
+  })
+
+  it('normalizes known character dialogue with brackets around the full line', () => {
+    const context = { characters: [{ id: 'player', name: '居眠鹿', role: 'player' as const }] }
+    const raw = '[居眠鹿（正常）：（今晚去哪里呢？）]'
+
+    expect(normalizeProtocolResponse(raw, context)).toBe('居眠鹿（正常）：（今晚去哪里呢？）')
+    expect(standardResponse(raw, context)).toBe('居眠鹿（正常）：（今晚去哪里呢？）')
+    expect(parseAssistantResponse(raw, context).segments[0]).toMatchObject({
+      characterId: 'player', characterName: '居眠鹿', expression: '正常', text: '（今晚去哪里呢？）',
+    })
+  })
+
+  it('does not normalize control lines or bracketed unknown characters', () => {
+    const context = { characters: [{ id: 'player', name: '居眠鹿', role: 'player' as const }] }
+    const raw = '[旁白] 夜幕降临。\n[未知角色]（正常）：晚上好。\n[居眠鹿]状态：服装：制服'
+
+    expect(normalizeProtocolResponse(raw, context)).toBe(raw)
   })
 
   it('forces generated expressions into the active portrait group enum', () => {
@@ -72,11 +101,23 @@ describe('parseAssistantResponse', () => {
 
   it('never infers dialogue from quotation marks in prose', () => {
     const text = '维纳斯走到窗边，轻声说：“今晚别走。”随后拉上窗帘。'
-    expect(parseAssistantResponse(text).segments).toEqual([{ type: 'narration', text }])
+    expect(parseAssistantResponse(text).segments).toEqual([])
+  })
+
+  it('keeps non-standard lines out of visible story segments', () => {
+    const parsed = parseAssistantResponse('我需要先分析用户意图。\n## 思考过程\n[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。\n这是一段格式说明。', {
+      characters: [{ id: 'venus', name: '维纳斯', role: 'npc' }],
+    })
+
+    expect(parsed.segments).toEqual([
+      { type: 'narration', text: '门外传来脚步声。' },
+      { type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '紧张', text: '别出声。' },
+    ])
+    expect(standardResponse('我需要先分析用户意图。\n[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。\n这是一段格式说明。')).toBe('[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。')
   })
 
   it('extracts scene state and removes scene and choice lines from story segments', () => {
-    const parsed = parseAssistantResponse('钟声响起。\n[场景] 地点：钟楼；时间：深夜\nA. 登上塔顶\nB. 留在原地')
+    const parsed = parseAssistantResponse('[旁白] 钟声响起。\n[场景] 地点：钟楼；时间：深夜\nA. 登上塔顶\nB. 留在原地')
 
     expect(parsed.segments).toEqual([{ type: 'narration', text: '钟声响起。' }])
     expect(parsed.choices).toEqual([{ id: 'A', text: '登上塔顶' }, { id: 'B', text: '留在原地' }])
@@ -92,7 +133,7 @@ describe('parseAssistantResponse', () => {
   })
 
   it('extracts narrative boundaries without displaying them as story segments', () => {
-    const parsed = parseAssistantResponse('[篇章结束]\n[篇章开始] 地下城探索\n[单元开始] 第一层入口\n众人走入遗迹。\nA. 检查墙壁')
+    const parsed = parseAssistantResponse('[篇章结束]\n[篇章开始] 地下城探索\n[单元开始] 第一层入口\n[旁白] 众人走入遗迹。\nA. 检查墙壁')
 
     expect(parsed.progressEvents).toEqual([
       { type: 'chapter_end' },
@@ -100,6 +141,17 @@ describe('parseAssistantResponse', () => {
       { type: 'unit_start', title: '第一层入口' },
     ])
     expect(parsed.segments).toEqual([{ type: 'narration', text: '众人走入遗迹。' }])
+  })
+
+  it('records the invisible chapter boundary between visible segments', () => {
+    const raw = '[状态] 地点：遗迹；时间：夜晚；章节：旧章；场景：延续；在场人物：维纳斯\n[旁白] 石门在身后关闭。\n[章节结束]\n[旁白] 天色渐亮，众人踏上归途。\n维纳斯（平静）：接下来去哪里？'
+    const parsed = parseAssistantResponse(raw, { characters: [{ id: 'venus', name: '维纳斯', role: 'npc' }] })
+
+    expect(parsed.chapterBoundaryIndexes).toEqual([1])
+    expect(parsed.progressEvents).toContainEqual({ type: 'chapter_end' })
+    expect(parsed.segments).toHaveLength(3)
+    expect(parsed.segments[1]).toEqual({ type: 'narration', text: '天色渐亮，众人踏上归途。' })
+    expect(standardResponse(raw)).toContain('\n[章节结束]\n')
   })
 
   it('parses the mandatory leading RPG state and hides it from the story', () => {

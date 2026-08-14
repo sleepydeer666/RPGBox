@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createDefaultAiSettings } from './game'
 
 describe('createDefaultAiSettings', () => {
+  it('uses a conservative default temperature without a provider', () => {
+    expect(createDefaultAiSettings().temperature).toBe(0.5)
+  })
+
   it('uses the RPG defaults instead of inheriting the provider output limit', () => {
     const settings = createDefaultAiSettings({
       id: 'provider',

@@ -16,3 +16,13 @@ export function completeStreamingLines(text: string): string {
   const lastLineBreak = text.lastIndexOf('\n')
   return lastLineBreak < 0 ? '' : text.slice(0, lastLineBreak + 1)
 }
+
+export function reachedChapterBoundaryStart(
+  boundaryIndexes: number[],
+  segmentIndex: number,
+  segmentsComplete: boolean,
+): number | undefined {
+  return boundaryIndexes
+    .filter((index) => index <= segmentIndex || (segmentsComplete && index === segmentIndex + 1))
+    .at(-1)
+}

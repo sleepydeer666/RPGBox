@@ -1,21 +1,25 @@
-import { AlertTriangle, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, MapPin, Menu, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, MapPin, Menu, RefreshCw, RotateCcw, Send, Server, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GameDrawer from './components/GameDrawer'
 import GameSettingsDialog from './components/GameSettingsDialog'
 import GlobalSettingsDialog from './components/GlobalSettingsDialog'
 import { createBlankGame, createInitialGame } from './game'
 import { tokenizeCharacterNames, tokenizeNarrationText } from './lib/characterText'
+import { buildTurnInstructions, chapterTurnCountBeforeLatestBoundary, currentChapterTurnCount, reportedChapterTitle, selectedChoiceEndsChapter } from './lib/chapterTurns'
+import { loadBundledDefaultPrompt, resolveGlobalJailbreakPrompt } from './lib/defaultPrompt'
+import { latestDebugExchange } from './lib/debugExchange'
 import { resolveCharacterExpression } from './lib/expressions'
 import { buildHistoryLines } from './lib/history'
+import { loadBundledRpgs } from './lib/bundledRpg'
 import { closesChapter, currentChapterSummary, normalizeMemoryState, partitionRecentChapterMemories, recentChapterMemories } from './lib/memory'
-import { CHAPTER_SUMMARY_SYSTEM_PROMPT, DISTANT_SUMMARY_SYSTEM_PROMPT, isValidChapterSummary, isValidDistantSummary } from './lib/memorySummary'
-import { parseAssistantResponse, visibleStory } from './lib/parser'
-import { completeStreamingLines, resolvePlayback } from './lib/playback'
+import { CHAPTER_SUMMARY_SYSTEM_PROMPT, DISTANT_SUMMARY_SYSTEM_PROMPT, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './lib/memorySummary'
+import { normalizeProtocolResponse, parseAssistantResponse, standardResponse, visibleStory } from './lib/parser'
+import { completeStreamingLines, reachedChapterBoundaryStart, resolvePlayback } from './lib/playback'
 import { portraitSource } from './lib/portraits'
 import { deletePortraitFile } from './lib/portraits'
 import { cloneGameSession, exportRpgbox, importRpgbox, type RpgboxImportSource, type RpgExportOptions } from './lib/rpgPackage'
-import { buildStructureRepairMessages, buildSystemPrompt, takeRecentConversationTurns, toApiMessages } from './lib/prompt'
-import { mergeStructureRepair } from './lib/repair'
+import { buildSystemPrompt, takeRecentConversationTurns, toApiMessages } from './lib/prompt'
+import { inspectLatestResponseCompletion, mergeContinuationResponse } from './lib/responseCompletion'
 import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback } from './lib/rollback'
 import { applyRpgStatePatch } from './lib/state'
 import { collectRecentActors, collectTurnActors, includeActiveSpeaker, type StageActor, type StageTurn } from './lib/stage'
@@ -29,10 +33,16 @@ function newId(prefix: string) {
 
 const CLOSE_CHAPTER_INSTRUCTION = '尽快收尾本章节，然后开启一段过渡剧情为新章节做准备；如果前后章节紧密连贯，也可以直接开始新章节。'
 const EMPTY_RPG_PLACEHOLDER = '新的旅程尚未留下文字。'
-const TOKEN_LIMIT_WARNING = '本轮输出已达最大token，导致输出不完整，建议回滚后增大最大token限制，或发送补充命令“请减少篇幅”。'
 
-function isTokenLimitFinishReason(reason: string | undefined) {
-  return ['length', 'max_tokens', 'max_output_tokens'].includes(reason?.trim().toLowerCase() ?? '')
+function formatMemorySummaryDebug(
+  label: string,
+  messages: Array<{ role: string; content: string }>,
+  responses: string[],
+  error?: string,
+) {
+  const request = messages.map((message) => `===== ${message.role.toUpperCase()} =====\n${message.content}`).join('\n\n')
+  const attempts = responses.map((response, index) => `===== 第 ${index + 1} 次 LLM 原始返回 =====\n${response || '（空响应）'}`).join('\n\n')
+  return [`######## ${label} ########`, request, attempts, error ? `===== 错误 =====\n${error}` : ''].filter(Boolean).join('\n\n')
 }
 
 function App() {
@@ -41,6 +51,7 @@ function App() {
   const [providers, setProviders] = useState<ProviderProfile[]>(defaults.providers)
   const [activeProviderId, setActiveProviderId] = useState(defaults.activeProviderId)
   const [globalJailbreakPrompt, setGlobalJailbreakPrompt] = useState('')
+  const [bundledDefaultPrompt, setBundledDefaultPrompt] = useState('')
   const [games, setGames] = useState<GameSession[]>([initialGame])
   const [activeGameId, setActiveGameId] = useState(initialGame.id)
   const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({ [initialGame.id]: 0 })
@@ -55,7 +66,8 @@ function App() {
   const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
   const [viewedStatusCharacterId, setViewedStatusCharacterId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [summarizingMemory, setSummarizingMemory] = useState<'chapter' | 'history' | null>(null)
+  const [continuingResponse, setContinuingResponse] = useState(false)
+  const [summarizingMemory, setSummarizingMemory] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [hydrated, setHydrated] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -72,7 +84,11 @@ function App() {
     maxTokens: activeGame.aiSettings.maxTokens,
   } : undefined
   const hasUsableProvider = Boolean(activeProvider?.baseUrl.trim() && activeProvider.apiKey.trim() && activeProvider.model.trim())
+  const chapterTurnCount = currentChapterTurnCount(activeGame)
+  const effectiveGlobalJailbreakPrompt = resolveGlobalJailbreakPrompt(globalJailbreakPrompt, bundledDefaultPrompt)
+  const latestAssistantIndex = activeGame.messages.map((message) => message.role).lastIndexOf('assistant')
   const latestAssistant = [...activeGame.messages].reverse().find((message) => message.role === 'assistant')
+  const debugExchange = useMemo(() => latestDebugExchange(activeGame.messages), [activeGame.messages])
   const latestParsed = useMemo(() => parseAssistantResponse(latestAssistant?.content ?? '', {
     characters: activeGame.characters,
   }), [activeGame.characters, latestAssistant?.content])
@@ -90,6 +106,10 @@ function App() {
   const currentSegment: StorySegment | undefined = playback.current
     ?? (busy ? { type: 'narration', text: '正在生成' } : undefined)
   const choicesVisible = !busy && segmentsComplete && latestParsed.choices.length > 0
+  const responseCompletion = useMemo(() => inspectLatestResponseCompletion(activeGame), [activeGame])
+  const needsContinuation = !busy && responseCompletion.canContinue && !responseCompletion.complete
+  const showProgressContinuation = needsContinuation && !responseCompletion.hasChoices && segmentsComplete
+  const showChoiceContinuation = needsContinuation && responseCompletion.hasChoices && choicesVisible
   const statusRulesEnabled = Boolean(activeGame.statusRulesPrompt?.trim())
   const hasStoryRecord = activeGame.messages.some((message) => message.role === 'user'
     || (message.role === 'assistant' && message.content.trim() && message.content.trim() !== EMPTY_RPG_PLACEHOLDER))
@@ -97,20 +117,51 @@ function App() {
   const previousStageTurns = useMemo(() => activeGame.messages.flatMap((message): StageTurn[] => {
     if (message.role !== 'assistant' || message.id === latestAssistant?.id) return []
     const parsed = parseAssistantResponse(message.content, { characters: activeGame.characters })
-    return [{ segments: parsed.segments, sceneChanged: parsed.sceneChanged, presentCharacterIds: parsed.gameData?.statePatch?.presentCharacterIds as string[] | undefined }]
+    const boundaryStart = parsed.chapterBoundaryIndexes.at(-1)
+    return [{
+      segments: parsed.segments.slice(boundaryStart ?? 0),
+      sceneChanged: parsed.sceneChanged || boundaryStart !== undefined,
+      presentCharacterIds: boundaryStart === undefined
+        ? parsed.gameData?.statePatch?.presentCharacterIds as string[] | undefined
+        : undefined,
+    }]
   }), [activeGame.characters, activeGame.messages, latestAssistant?.id])
   const currentStageParse = busy ? streamingParsed : latestParsed
-  const displayGameState = applyRpgStatePatch(activeGame.gameState, currentStageParse.gameData?.statePatch, activeGame.nsfwEnabled)
-  const displayChapterTitle = currentStageParse.chapterTitle !== undefined
+  const chapterBoundaryStart = reachedChapterBoundaryStart(
+    currentStageParse.chapterBoundaryIndexes,
+    segmentIndex,
+    segmentsComplete,
+  )
+  const chapterBoundaryCrossed = chapterBoundaryStart !== undefined
+  const patchedDisplayGameState = applyRpgStatePatch(activeGame.gameState, currentStageParse.gameData?.statePatch, activeGame.nsfwEnabled)
+  const displayGameState = chapterBoundaryCrossed
+    ? { ...patchedDisplayGameState, presentCharacterIds: [] }
+    : patchedDisplayGameState
+  const displayChapterTitle = chapterBoundaryCrossed
+    ? ''
+    : currentStageParse.chapterTitle !== undefined
     ? currentStageParse.chapterTitle.trim()
     : activeGame.narrative.chapter.title.trim()
+  const displayChapterTurnCount = chapterBoundaryCrossed
+    ? 0
+    : currentStageParse.chapterBoundaryIndexes.length
+      ? chapterTurnCountBeforeLatestBoundary(activeGame, latestAssistantIndex)
+      : chapterTurnCount
+  const currentPresentCharacterIds = chapterBoundaryCrossed
+    ? undefined
+    : currentStageParse.gameData?.statePatch?.presentCharacterIds as string[] | undefined
   const persistentDialogueActors = collectRecentActors([
-    ...previousStageTurns,
-    { segments: playback.segments.slice(0, segmentIndex + 1), sceneChanged: currentStageParse.sceneChanged, presentCharacterIds: currentStageParse.gameData?.statePatch?.presentCharacterIds as string[] | undefined },
+    ...(chapterBoundaryCrossed ? [] : previousStageTurns),
+    {
+      segments: playback.segments.slice(chapterBoundaryStart ?? 0, segmentIndex + 1),
+      sceneChanged: currentStageParse.sceneChanged || chapterBoundaryCrossed,
+      presentCharacterIds: currentPresentCharacterIds,
+    },
   ], activeGame.characters, 2, displayGameState.contentMode, true)
-  const dialogueActors = includeActiveSpeaker(persistentDialogueActors, currentSegment, activeGame.characters, displayGameState.contentMode)
+  const dialogueActors = includeActiveSpeaker(persistentDialogueActors, currentSegment, activeGame.characters, displayGameState.contentMode, 2)
+  const choiceBoundaryStart = latestParsed.chapterBoundaryIndexes.at(-1)
   const choiceActors = collectTurnActors(
-    latestParsed.segments,
+    latestParsed.segments.slice(choiceBoundaryStart ?? 0),
     activeGame.characters.filter((character) => character.role === 'npc'),
     latestParsed.gameData?.statePatch?.presentCharacterIds as string[] | undefined,
     4,
@@ -131,12 +182,25 @@ function App() {
   )
 
   useEffect(() => {
-    void loadState().then((saved) => {
+    void loadBundledDefaultPrompt().then(setBundledDefaultPrompt)
+  }, [])
+
+  useEffect(() => {
+    void loadState().then(async (saved) => {
       if (saved.providers?.length) setProviders(saved.providers)
       if (saved.activeProviderId) setActiveProviderId(saved.activeProviderId)
       if (saved.globalJailbreakPrompt) setGlobalJailbreakPrompt(saved.globalJailbreakPrompt)
-      if (saved.games?.length) setGames(saved.games)
-      if (saved.activeGameId) setActiveGameId(saved.activeGameId)
+      if (saved.games?.length) {
+        setGames(saved.games)
+        if (saved.activeGameId) setActiveGameId(saved.activeGameId)
+      } else {
+        const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
+        const bundledGames = await loadBundledRpgs(provider)
+        if (bundledGames.length) {
+          setGames(bundledGames)
+          setActiveGameId(bundledGames[0].id)
+        }
+      }
       setHydrated(true)
     })
   }, [])
@@ -170,12 +234,24 @@ function App() {
     setGameDrawerOpen(false)
   }
 
+  function reorderGames(gameId: string, direction: 'up' | 'down') {
+    setGames((current) => {
+      const index = current.findIndex((game) => game.id === gameId)
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current
+      const next = [...current]
+      const [game] = next.splice(index, 1)
+      next.splice(targetIndex, 0, game)
+      return next
+    })
+  }
+
   async function createGame(title: string, importSource: RpgboxImportSource | null, nsfwEnabled: boolean) {
     const blank = createBlankGame(games.length + 1, configuredProvider)
     const imported = importSource ? await importRpgbox(importSource, blank) : blank
     const game = {
       ...imported,
-      title: title.trim() || blank.title,
+      title: title.trim() || importSource?.name.replace(/\.rpgbox$/iu, '').trim() || blank.title,
       nsfwEnabled,
       gameState: nsfwEnabled ? imported.gameState : { ...imported.gameState, contentMode: 'normal' as const },
       updatedAt: Date.now(),
@@ -296,7 +372,14 @@ function App() {
     setError('')
   }
 
-  function chapterMessages(game: GameSession, messages: ChatMessage[], chapterTitle = game.narrative.chapter.title) {
+  function chapterMessages(game: GameSession, messages: ChatMessage[], chapterTitle = game.narrative.chapter.title, sourceMessageIds?: string[]) {
+    if (sourceMessageIds?.length) {
+      const sourceIds = new Set(sourceMessageIds)
+      return messages.filter((message) => sourceIds.has(message.id))
+    }
+    if (chapterTitle !== game.narrative.chapter.title) {
+      return messages.filter((message) => message.chapterTitle === chapterTitle)
+    }
     const start = messages.findIndex((message) => message.id === game.narrative.chapter.startedAtMessageId)
     const range = start >= 0 ? messages.slice(start) : messages
     return range.filter((message) => message.chapterTitle === undefined || message.chapterTitle === chapterTitle)
@@ -313,52 +396,100 @@ function App() {
     }).join('\n\n')
   }
 
-  async function summarizeChapterMemory(game: GameSession, sourceMessages: ChatMessage[], chapterTitle: string, signal: AbortSignal) {
+  async function summarizeChapterMemory(
+    game: GameSession,
+    sourceMessages: ChatMessage[],
+    chapterTitle: string,
+    signal: AbortSignal,
+    options: { sourceMessageIds?: string[]; existingSummary?: string; onDebug?: (content: string) => void } = {},
+  ) {
     if (!activeProvider || !chapterTitle.trim()) return undefined
-    const transcript = memoryTranscript(chapterMessages(game, sourceMessages, chapterTitle))
+    const transcript = memoryTranscript(chapterMessages(game, sourceMessages, chapterTitle, options.sourceMessageIds))
     const provider = { ...activeProvider, temperature: 0.2, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: Math.min(1600, activeProvider.maxTokens) }
     const messages = [
       { role: 'system' as const, content: CHAPTER_SUMMARY_SYSTEM_PROMPT },
-      { role: 'user' as const, content: `章节名称：${chapterTitle}\n\n已有的本章摘要（仅在内容确实是剧情摘要时参考；若包含网页、代码、任务分析或其他无关内容则完全忽略）：\n${currentChapterSummary(game.memory) || '无'}\n\n本章剧情：\n${transcript}` },
+      { role: 'user' as const, content: `章节名称：${chapterTitle}\n\n已有的本章摘要（仅在内容确实是剧情摘要时参考；若包含网页、代码、任务分析或其他无关内容则完全忽略）：\n${(options.existingSummary ?? currentChapterSummary(game.memory)) || '无'}\n\n本章剧情：\n${transcript || '无可用剧情记录'}` },
     ]
+    const responses: string[] = []
+    options.onDebug?.(formatMemorySummaryDebug(`章节记忆总结：${chapterTitle}`, messages, responses))
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const summary = (await streamCompletion({ provider, signal, messages: attempt
-        ? [...messages, { role: 'user', content: '上次输出不符合章节记忆格式。请重新执行原任务，只输出以“本章摘要：”开头的单段中文事实摘要。' }]
-        : messages })).trim()
+      let rawSummary = ''
+      try {
+        rawSummary = await streamCompletion({ provider, signal, messages: attempt
+          ? [...messages, { role: 'user', content: '上次输出不符合章节记忆格式。请重新执行原任务，只输出以“本章摘要：”开头的单段中文事实摘要。' }]
+          : messages })
+      } catch (error) {
+        const message = toErrorMessage(error)
+        options.onDebug?.(formatMemorySummaryDebug(`章节记忆总结：${chapterTitle}`, messages, responses, message))
+        throw error
+      }
+      responses.push(rawSummary)
+      options.onDebug?.(formatMemorySummaryDebug(`章节记忆总结：${chapterTitle}`, messages, responses))
+      const summary = normalizeMemorySummaryOutput(rawSummary)
       if (isValidChapterSummary(summary)) return summary
     }
-    throw new Error('模型连续两次返回了无效的章节摘要')
+    const error = '模型连续两次返回了无效的章节摘要'
+    options.onDebug?.(formatMemorySummaryDebug(`章节记忆总结：${chapterTitle}`, messages, responses, error))
+    throw new Error(error)
   }
 
-  async function summarizeDistantMemory(existing: string, chapters: ChapterMemory[], signal: AbortSignal) {
+  async function summarizeDistantMemory(existing: string, chapters: ChapterMemory[], signal: AbortSignal, onDebug?: (content: string) => void) {
     if (!activeProvider) return undefined
     const provider = { ...activeProvider, temperature: 0.2, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: Math.min(1600, activeProvider.maxTokens) }
     const messages = [
       { role: 'system' as const, content: DISTANT_SUMMARY_SYSTEM_PROMPT },
       { role: 'user' as const, content: `既有远期记忆：\n${existing || '无'}\n\n移出的旧章节：\n${chapters.map((chapter) => `章节：${chapter.title}\n${chapter.summary}`).join('\n\n') || '无，仅整理既有远期记忆'}` },
     ]
+    const responses: string[] = []
+    onDebug?.(formatMemorySummaryDebug('远期记忆整理', messages, responses))
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const summary = (await streamCompletion({ provider, signal, messages: attempt
-        ? [...messages, { role: 'user', content: '上次输出不符合远期记忆格式。请重新执行原任务，只输出以“远期记忆：”开头的单段中文事实摘要。' }]
-        : messages })).trim()
+      let rawSummary = ''
+      try {
+        rawSummary = await streamCompletion({ provider, signal, messages: attempt
+          ? [...messages, { role: 'user', content: '上次输出不符合远期记忆格式。请重新执行原任务，只输出以“远期记忆：”开头的单段中文事实摘要。' }]
+          : messages })
+      } catch (error) {
+        const message = toErrorMessage(error)
+        onDebug?.(formatMemorySummaryDebug('远期记忆整理', messages, responses, message))
+        throw error
+      }
+      responses.push(rawSummary)
+      onDebug?.(formatMemorySummaryDebug('远期记忆整理', messages, responses))
+      const summary = normalizeMemorySummaryOutput(rawSummary)
       if (isValidDistantSummary(summary)) return summary
     }
-    throw new Error('模型连续两次返回了无效的远期记忆')
+    const error = '模型连续两次返回了无效的远期记忆'
+    onDebug?.(formatMemorySummaryDebug('远期记忆整理', messages, responses, error))
+    throw new Error(error)
   }
 
-  async function summarizeMemoryNow(kind: 'chapter' | 'history') {
+  async function summarizeMemoryNow(kind: 'chapter' | 'history', completedChapter?: ChapterMemory) {
     if (busy || summarizingMemory || !activeProvider) return
-    setSummarizingMemory(kind)
+    const operationId = completedChapter?.id ?? kind
+    setSummarizingMemory(operationId)
     setError('')
     try {
       const signal = new AbortController().signal
       const result = kind === 'chapter'
-        ? await summarizeChapterMemory(activeGame, activeGame.messages, activeGame.narrative.chapter.title, signal)
+        ? await summarizeChapterMemory(
+          activeGame,
+          activeGame.messages,
+          completedChapter?.title ?? activeGame.narrative.chapter.title,
+          signal,
+          completedChapter ? { sourceMessageIds: completedChapter.sourceMessageIds, existingSummary: completedChapter.summary } : {},
+        )
         : await summarizeDistantMemory(activeGame.memory.historicalSummary, [], signal)
       if (result) updateGame(activeGame.id, (game) => ({
         ...game,
         memory: kind === 'chapter'
-          ? { ...normalizeMemoryState(game.memory), currentChapterSummary: result }
+          ? completedChapter
+            ? {
+              ...normalizeMemoryState(game.memory),
+              recentChapters: recentChapterMemories(normalizeMemoryState(game.memory)).map((chapter) => chapter.id === completedChapter.id
+                ? { ...chapter, summary: result }
+                : chapter),
+            }
+            : { ...normalizeMemoryState(game.memory), currentChapterSummary: result }
           : { ...normalizeMemoryState(game.memory), historicalSummary: result },
         updatedAt: Date.now(),
       }))
@@ -369,11 +500,103 @@ function App() {
     }
   }
 
+  async function continueTruncatedResponse() {
+    if (busy || summarizingMemory || !activeProvider) return
+    const gameSnapshot = activeGame
+    const completion = inspectLatestResponseCompletion(gameSnapshot)
+    const assistantIndex = gameSnapshot.messages.map((message) => message.role).lastIndexOf('assistant')
+    const assistantMessage = gameSnapshot.messages[assistantIndex]
+    const userMessage = gameSnapshot.messages[assistantIndex - 1]
+    if (!completion.canContinue || completion.complete || !assistantMessage || userMessage?.role !== 'user') return
+
+    const requestGlobalJailbreakPrompt = resolveGlobalJailbreakPrompt(
+      globalJailbreakPrompt,
+      bundledDefaultPrompt || await loadBundledDefaultPrompt(),
+    )
+    const gameId = gameSnapshot.id
+    const parseContext = { characters: gameSnapshot.characters }
+    const originalRaw = normalizeProtocolResponse(assistantMessage.rawContent ?? assistantMessage.content, parseContext)
+    const apiHistory = gameSnapshot.messages.map((message) => message.role === 'assistant'
+      ? { ...message, content: message.id === assistantMessage.id ? originalRaw : normalizeProtocolResponse(message.content, parseContext) }
+      : message)
+    const continuationInstruction: ChatMessage = {
+      id: newId('continuation'),
+      role: 'user',
+      content: '继续输出完整',
+      createdAt: Date.now(),
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    setViewedStatusCharacterId(null)
+    setError('')
+    setContinuingResponse(true)
+    setBusy(true)
+
+    try {
+      const continuation = await streamCompletion({
+        provider: activeProvider,
+        messages: toApiMessages(
+          buildSystemPrompt(gameSnapshot, requestGlobalJailbreakPrompt),
+          [...takeRecentConversationTurns(apiHistory, gameSnapshot.aiSettings.contextTurns), continuationInstruction],
+        ),
+        signal: controller.signal,
+        onToken: (content) => {
+          const mergedRaw = mergeContinuationResponse(originalRaw, content)
+          updateGame(gameId, (game) => ({
+            ...game,
+            messages: game.messages.map((message) => message.id === assistantMessage.id
+              ? { ...message, content: standardResponse(mergedRaw, { characters: gameSnapshot.characters }), rawContent: mergedRaw }
+              : message),
+            updatedAt: Date.now(),
+          }))
+        },
+      })
+      const mergedRaw = mergeContinuationResponse(originalRaw, continuation)
+      const parsed = parseAssistantResponse(mergedRaw, { characters: gameSnapshot.characters })
+      const reportedChapter = reportedChapterTitle(parsed)
+      const turnChapter = reportedChapter ?? assistantMessage.chapterTitle ?? gameSnapshot.narrative.chapter.title
+      const statusUpdates = gameSnapshot.statusRulesPrompt?.trim()
+        ? new Map(parsed.characterStatusUpdates.map((update) => [update.characterId, update.status]))
+        : new Map<string, string>()
+
+      updateGame(gameId, (game) => ({
+        ...game,
+        messages: game.messages.map((message) => {
+          if (message.id === assistantMessage.id) return { ...message, content: standardResponse(mergedRaw, { characters: gameSnapshot.characters }), rawContent: mergedRaw, chapterTitle: turnChapter }
+          if (message.id === userMessage.id) return { ...message, chapterTitle: turnChapter }
+          return message
+        }),
+        gameState: parsed.chapterBoundaryIndexes.length
+          ? { ...applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled), presentCharacterIds: [] }
+          : applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled),
+        characters: statusUpdates.size
+          ? game.characters.map((character) => statusUpdates.has(character.id)
+            ? { ...character, statusBar: statusUpdates.get(character.id) }
+            : character)
+          : game.characters,
+        narrative: reportedChapter !== undefined && reportedChapter !== game.narrative.chapter.title
+          ? { chapter: { id: newId('chapter'), title: reportedChapter, startedAtMessageId: userMessage.id } }
+          : game.narrative,
+        updatedAt: Date.now(),
+      }))
+    } catch (continuationError) {
+      if (!controller.signal.aborted) setError(`补全失败：${toErrorMessage(continuationError)}`)
+    } finally {
+      setBusy(false)
+      setContinuingResponse(false)
+      abortRef.current = null
+    }
+  }
+
   async function sendTurn(forcedInput?: string) {
     const choiceText = selectedChoices.join('')
     const supplement = customInput.trim()
     const input = forcedInput?.trim() || [choiceText, supplement].filter(Boolean).join('，但是')
     if (!input || busy || summarizingMemory || !activeProvider) return
+    const requestGlobalJailbreakPrompt = resolveGlobalJailbreakPrompt(
+      globalJailbreakPrompt,
+      bundledDefaultPrompt || await loadBundledDefaultPrompt(),
+    )
     setViewedStatusCharacterId(null)
 
     const gameId = activeGame.id
@@ -388,62 +611,49 @@ function App() {
 
     const userMessage: ChatMessage = { id: newId('user'), role: 'user', content: input, createdAt: Date.now() }
     const pendingAssistant: ChatMessage = { id: newId('assistant'), role: 'assistant', content: '', createdAt: Date.now() }
-    const requestMessages = [...gameSnapshot.messages, userMessage]
+    const endsChapter = Boolean(gameSnapshot.narrative.chapter.title.trim()) && (
+      forcedInput?.trim() === CLOSE_CHAPTER_INSTRUCTION
+      || (!forcedInput && selectedChoiceEndsChapter(latestParsed.choices, selectedChoices))
+    )
+    const turnInstructions = buildTurnInstructions(gameSnapshot, endsChapter)
+    const requestContent = `${input}\n\n${turnInstructions.join('\n')}`
+    const storedUserMessage = { ...userMessage, requestContent }
+    const requestMessages = [...gameSnapshot.messages, storedUserMessage]
+    const parseContext = { characters: gameSnapshot.characters }
+    const normalizedHistory = gameSnapshot.messages.map((message) => message.role === 'assistant'
+      ? { ...message, content: normalizeProtocolResponse(message.content, parseContext) }
+      : message)
+    const apiRequestMessages = [
+      ...normalizedHistory,
+      { ...userMessage, content: requestContent },
+    ]
     const rollbackSnapshot = createRollbackSnapshot(gameSnapshot, newId('rollback'))
     updateGame(gameId, (game) => ({ ...game, messages: [...requestMessages, pendingAssistant], rollbackLog: appendRollbackSnapshot(game.rollbackLog, rollbackSnapshot), updatedAt: Date.now() }))
 
     try {
-      let mainFinishReason: string | undefined
-      let fullText = await streamCompletion({
+      const fullText = await streamCompletion({
         provider: activeProvider,
         messages: toApiMessages(
-          buildSystemPrompt(gameSnapshot, globalJailbreakPrompt),
-          takeRecentConversationTurns(requestMessages, gameSnapshot.aiSettings.contextTurns),
+          buildSystemPrompt(gameSnapshot, requestGlobalJailbreakPrompt),
+          takeRecentConversationTurns(apiRequestMessages, gameSnapshot.aiSettings.contextTurns),
         ),
         signal: controller.signal,
-        onToken: (content) => updateGame(gameId, (game) => ({ ...game, messages: [...requestMessages, { ...pendingAssistant, content }], updatedAt: Date.now() })),
-        onFinishReason: (reason) => { mainFinishReason = reason },
+        onToken: (content) => updateGame(gameId, (game) => ({
+          ...game,
+          messages: [...requestMessages, { ...pendingAssistant, content: standardResponse(content, { characters: gameSnapshot.characters }) }],
+          updatedAt: Date.now(),
+        })),
       })
       const rawContent = fullText
-      let repairContent: string | undefined
-      let parsed = parseAssistantResponse(fullText, { characters: gameSnapshot.characters })
-      if (!parsed.choices.length && visibleStory(fullText)) {
-        try {
-          const repairResponse = await streamCompletion({
-            provider: {
-              ...activeProvider,
-              temperature: 0.2,
-              topP: 1,
-              presencePenalty: 0,
-              frequencyPenalty: 0,
-              maxTokens: Math.min(1600, activeProvider.maxTokens),
-            },
-            messages: buildStructureRepairMessages(gameSnapshot, globalJailbreakPrompt, visibleStory(fullText)),
-            signal: controller.signal,
-          })
-          repairContent = repairResponse
-          const repaired = mergeStructureRepair(fullText, repairResponse, gameSnapshot.newStoryChoiceCount)
-          if (repaired) {
-            fullText = repaired
-            parsed = parseAssistantResponse(fullText, { characters: gameSnapshot.characters })
-          } else {
-            setError('剧情已保存，但模型未能生成有效选项；仍可输入自定义行动。')
-          }
-        } catch {
-          if (!controller.signal.aborted) setError('剧情已保存，但自动补全选项失败；仍可输入自定义行动。')
-        }
-      }
-      const legacyChapterStart = [...parsed.progressEvents].reverse().find((event) => event.type === 'chapter_start')
-      const legacyChapterEnd = parsed.progressEvents.some((event) => event.type === 'chapter_end')
-      const reportedChapter = parsed.chapterTitle !== undefined
-        ? parsed.chapterTitle.trim()
-        : legacyChapterStart?.title?.trim() ?? (legacyChapterEnd ? '' : undefined)
+      const parsed = parseAssistantResponse(fullText, { characters: gameSnapshot.characters })
+      const reportedChapter = reportedChapterTitle(parsed)
       const previousChapter = gameSnapshot.narrative.chapter.title.trim()
       const turnChapter = reportedChapter === undefined ? previousChapter : reportedChapter
       const chapterChanged = reportedChapter !== undefined && turnChapter !== previousChapter
       const chapterClosed = closesChapter(previousChapter, reportedChapter)
-      const completedUser = { ...userMessage, chapterTitle: turnChapter }
-      const completedAssistant = { ...pendingAssistant, content: fullText, rawContent, repairContent, chapterTitle: turnChapter }
+      const completedUser = { ...storedUserMessage, chapterTitle: turnChapter }
+      const normalizedContent = standardResponse(fullText, { characters: gameSnapshot.characters })
+      const completedAssistant = { ...pendingAssistant, content: normalizedContent, rawContent, chapterTitle: turnChapter }
       const completeMessages = [...gameSnapshot.messages, completedUser, completedAssistant]
       const nextNarrative = chapterChanged ? {
         chapter: {
@@ -454,17 +664,21 @@ function App() {
       } : gameSnapshot.narrative
       const normalizedMemory = normalizeMemoryState(gameSnapshot.memory)
       const draftSummary = currentChapterSummary(normalizedMemory).trim()
-      const draftMemory: ChapterMemory | undefined = chapterClosed && draftSummary ? {
+      const closedChapterMessages = chapterClosed
+        ? chapterMessages(gameSnapshot, gameSnapshot.messages, previousChapter)
+        : []
+      const pendingChapterMemory: ChapterMemory | undefined = chapterClosed ? {
         id: gameSnapshot.narrative.chapter.id,
         title: previousChapter,
         summary: draftSummary,
         completedAt: Date.now(),
+        sourceMessageIds: closedChapterMessages.map((message) => message.id),
       } : undefined
       const memoryAfterBoundary = chapterChanged ? {
         ...normalizedMemory,
         currentChapterSummary: '',
-        recentChapters: draftMemory
-          ? [...recentChapterMemories(normalizedMemory).filter((chapter) => chapter.id !== draftMemory.id), draftMemory]
+        recentChapters: pendingChapterMemory
+          ? [...recentChapterMemories(normalizedMemory).filter((chapter) => chapter.id !== pendingChapterMemory.id), pendingChapterMemory]
           : recentChapterMemories(normalizedMemory),
       } : normalizedMemory
       const statusUpdates = gameSnapshot.statusRulesPrompt?.trim()
@@ -473,7 +687,9 @@ function App() {
       updateGame(gameId, (game) => ({
         ...game,
         messages: completeMessages,
-        gameState: applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled),
+        gameState: parsed.chapterBoundaryIndexes.length
+          ? { ...applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled), presentCharacterIds: [] }
+          : applyRpgStatePatch(game.gameState, parsed.gameData?.statePatch, game.nsfwEnabled),
         characters: statusUpdates.size
           ? game.characters.map((character) => statusUpdates.has(character.id)
             ? { ...character, statusBar: statusUpdates.get(character.id) }
@@ -483,26 +699,48 @@ function App() {
         memory: memoryAfterBoundary,
         updatedAt: Date.now(),
       }))
-      if (isTokenLimitFinishReason(mainFinishReason)) setError(TOKEN_LIMIT_WARNING)
-
       if (chapterClosed) {
         const summaryController = new AbortController()
         void (async () => {
+          let chapterSummaryDebug = ''
+          const updateSummaryDebug = (content: string) => {
+            chapterSummaryDebug = content
+            updateGame(gameId, (game) => ({
+              ...game,
+              messages: game.messages.map((message) => message.id === completedAssistant.id
+                ? { ...message, memorySummaryDebug: content }
+                : message),
+              updatedAt: Date.now(),
+            }))
+          }
           try {
-            const summary = await summarizeChapterMemory(gameSnapshot, gameSnapshot.messages, previousChapter, summaryController.signal)
+            const summary = await summarizeChapterMemory(
+              gameSnapshot,
+              gameSnapshot.messages,
+              previousChapter,
+              summaryController.signal,
+              {
+                sourceMessageIds: pendingChapterMemory?.sourceMessageIds,
+                existingSummary: draftSummary,
+                onDebug: updateSummaryDebug,
+              },
+            )
             if (summary) {
               const completedChapter: ChapterMemory = {
                 id: gameSnapshot.narrative.chapter.id,
                 title: previousChapter,
                 summary,
                 completedAt: Date.now(),
+                sourceMessageIds: pendingChapterMemory?.sourceMessageIds,
               }
               const recent = [...recentChapterMemories(normalizedMemory).filter((chapter) => chapter.id !== completedChapter.id), completedChapter]
               const { overflow, retained: retainedWithinLimit } = partitionRecentChapterMemories(recent, normalizedMemory.recentChapterLimit)
               let historicalSummary = normalizedMemory.historicalSummary
               let retained = recent
               if (overflow.length) {
-                const distant = await summarizeDistantMemory(historicalSummary, overflow, summaryController.signal)
+                const distant = await summarizeDistantMemory(historicalSummary, overflow, summaryController.signal, (content) => {
+                  updateSummaryDebug(`${chapterSummaryDebug}\n\n${content}`)
+                })
                 if (distant) {
                   historicalSummary = distant
                   retained = retainedWithinLimit
@@ -562,7 +800,7 @@ function App() {
             {activeGame.nsfwEnabled && <span className={`content-mode ${displayGameState.contentMode}`}>{displayGameState.contentMode === 'nsfw' ? 'NSFW' : '常规'}</span>}
           </div>
           {choicesVisible ? (
-            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} changedStatusCharacterIds={changedStatusIds} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} />
+            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} changedStatusCharacterIds={changedStatusIds} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} showContinuation={showChoiceContinuation} onContinue={() => void continueTruncatedResponse()} />
           ) : busy && currentSegment?.type === 'dialogue' ? (
             <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} streaming />
           ) : busy ? (
@@ -574,35 +812,35 @@ function App() {
           )}
         </div>
 
-        <footer className={`interaction-dock ${emptyRpg ? 'empty-rpg-mode' : !busy && segmentsComplete ? 'composer-mode' : 'playback-mode'}`}>
+        <footer className={`interaction-dock ${emptyRpg ? 'empty-rpg-mode' : !busy && segmentsComplete && !showProgressContinuation ? 'composer-mode' : 'playback-mode'}`}>
           {error && <div className="error-banner">{error}<button onClick={() => setError('')} title="关闭"><X size={15} /></button></div>}
           {emptyRpg ? <div className="dock-main empty-rpg-dock"><button type="button" className="start-game-button" onClick={() => void sendTurn('开始新的一天')} disabled={!hasUsableProvider} title={!hasUsableProvider ? '请先完成 AI API 设置' : '开始游戏'}><Send size={18} />开始游戏</button></div> : <div className="dock-main">
             <button className="rewind-button" onClick={rewindSegment} disabled={busy || segmentIndex <= 0} title="返回上一段"><ChevronLeft size={21} /></button>
             {busy ? (
               <div className="playback-info">
-                <div className="narrative-position">{displayChapterTitle || '章节间过渡'}</div>
+                <div className="narrative-position">{displayChapterTitle || '章节间过渡'}-{displayChapterTurnCount}</div>
                 <div className="generation-status" aria-live="polite">
-                  <span>{streamingParsed.segments.length ? `${segmentIndex + 1} / ${streamingParsed.segments.length}` : '0 / 0'} · <span className="generation-label">生成中</span></span>
+                  <span>{streamingParsed.segments.length ? `${segmentIndex + 1} / ${streamingParsed.segments.length}` : '0 / 0'} · <span className="generation-label">{continuingResponse ? '补全中' : '生成中'}</span></span>
                   <button className="send-button stop" onClick={() => { abortRef.current?.abort(); setBusy(false) }} title="停止生成"><CircleStop size={20} /></button>
                 </div>
               </div>
-            ) : segmentsComplete ? (
+            ) : segmentsComplete && !showProgressContinuation ? (
               <div className="composer"><textarea value={customInput} onChange={(event) => setCustomInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendTurn() } }} placeholder={selectedChoices.length ? '补充行动（可选）' : '输入自定义行动'} rows={1} /><button className="send-button" onClick={() => void sendTurn()} disabled={!customInput.trim() && !selectedChoices.length} title="发送行动"><Send size={19} /></button></div>
             ) : (
               <div className="playback-info">
-                <div className="narrative-position">{displayChapterTitle || '章节间过渡'}</div>
-                <div className="playback-status">{latestParsed.segments.length ? `${segmentIndex + 1} / ${latestParsed.segments.length} · 完成` : '等待剧情'}</div>
+                <div className="narrative-position">{displayChapterTitle || '章节间过渡'}-{displayChapterTurnCount}</div>
+                <div className="playback-status"><span>{latestParsed.segments.length ? `${segmentIndex + 1} / ${latestParsed.segments.length} · ${showProgressContinuation ? '输出不完整' : '完成'}` : '等待剧情'}</span>{showProgressContinuation && <button type="button" className="continue-response-button" onClick={() => void continueTruncatedResponse()}><RefreshCw size={14} />从截断处补全</button>}</div>
               </div>
             )}
           </div>}
         </footer>
       </main>
 
-      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} />
-      {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, globalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
+      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} />
+      {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
-      {debugOpen && <RawResponseDialog content={latestAssistant?.rawContent ?? latestAssistant?.content ?? ''} repairContent={latestAssistant?.repairContent} onClose={() => setDebugOpen(false)} />}
+      {debugOpen && <RawResponseDialog requestContent={debugExchange.requestContent} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryContent={debugExchange.memorySummaryContent} onClose={() => setDebugOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} onSummarize={summarizeMemoryNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
     </div>
@@ -626,8 +864,8 @@ function RollbackConfirmDialog({ onCancel, onConfirm }: { onCancel: () => void; 
 
 function MemoryDialog({ game, summarizing, onSummarize, onChange, onClose }: {
   game: GameSession
-  summarizing: 'chapter' | 'history' | null
-  onSummarize: (kind: 'chapter' | 'history') => Promise<void>
+  summarizing: string | null
+  onSummarize: (kind: 'chapter' | 'history', completedChapter?: ChapterMemory) => Promise<void>
   onChange: (memory: MemoryState) => void
   onClose: () => void
 }) {
@@ -662,7 +900,7 @@ function MemoryDialog({ game, summarizing, onSummarize, onChange, onClose }: {
             <p className="memory-capacity-note">最多保留 {memory.recentChapterLimit ?? 5} 个已完成章节；超出后最早的章节会自动压缩进远期记忆。手动删除不会转入远期记忆，且不可恢复。</p>
             <div className="recent-memory-list">
               {currentTitle ? <div className="memory-entry"><div className="memory-entry-head"><span>当前：{currentTitle}</span>{hasCurrentMemory && <button type="button" className="danger-icon memory-delete-button" onClick={() => onChange({ ...memory, currentChapterSummary: '' })} title={`删除“${currentTitle}”的主记忆`} aria-label={`删除“${currentTitle}”的主记忆`}><Trash2 size={15} /></button>}</div><textarea aria-label={`${currentTitle}的当前章节记忆`} value={currentSummary} onChange={(event) => onChange({ ...memory, currentChapterSummary: event.target.value })} placeholder="当前章节尚未总结" /></div> : <div className="empty-memory">当前处于章节间过渡，不生成章节记忆。</div>}
-              {recent.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title}</span><button type="button" className="danger-icon memory-delete-button" onClick={() => removeRecentChapter(chapter.id)} title={`删除“${chapter.title}”的主记忆`} aria-label={`删除“${chapter.title}”的主记忆`}><Trash2 size={15} /></button></div><textarea aria-label={`${chapter.title}的章节记忆`} value={chapter.summary} onChange={(event) => patchRecentChapter(chapter.id, event.target.value)} /></div>)}
+              {recent.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title}</span><span className="memory-entry-actions"><button type="button" className="secondary-button compact" onClick={() => void onSummarize('chapter', chapter)} disabled={Boolean(summarizing)} title={`重新总结“${chapter.title}”`}><RefreshCw size={13} />{summarizing === chapter.id ? '总结中' : '重新总结'}</button><button type="button" className="danger-icon memory-delete-button" onClick={() => removeRecentChapter(chapter.id)} title={`删除“${chapter.title}”的主记忆`} aria-label={`删除“${chapter.title}”的主记忆`}><Trash2 size={15} /></button></span></div><textarea aria-label={`${chapter.title}的章节记忆`} value={chapter.summary} onChange={(event) => patchRecentChapter(chapter.id, event.target.value)} placeholder="自动总结失败时可手工编辑或重新总结" /></div>)}
               {!currentTitle && !recent.length && <div className="empty-memory">暂无主记忆。</div>}
             </div>
           </section>
@@ -690,7 +928,7 @@ function DialogueScene({ segment, characters, actors, mode, viewedStatusCharacte
     : character?.name || segment.characterName || segment.characterId
   return (
     <StoryScene
-      actors={actors.length ? actors : portrait && character ? [{ character, expression: segment.expression ?? '' }] : []}
+      actors={actors.length ? actors : portrait && character ? [{ character, expression: segment.expression ?? '', position: 0, enteredAt: 0 }] : []}
       activeCharacterId={portrait ? character?.id : undefined}
       mode={mode}
       viewedStatusCharacterId={viewedStatusCharacterId}
@@ -713,11 +951,12 @@ function NarrationScene({ text, characters, actors, mode, viewedStatusCharacterI
   )
 }
 
-function ChoiceScene({ choices, selectedChoices, actors, characters, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, changedStatusCharacterIds, onToggle, onCloseChapter }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; mode: PortraitGroup; changedStatusCharacterIds: Set<string>; onToggle: (choice: Choice) => void; onCloseChapter: () => void } & StatusViewProps) {
+function ChoiceScene({ choices, selectedChoices, actors, characters, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, changedStatusCharacterIds, onToggle, onCloseChapter, showContinuation, onContinue }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; mode: PortraitGroup; changedStatusCharacterIds: Set<string>; onToggle: (choice: Choice) => void; onCloseChapter: () => void; showContinuation: boolean; onContinue: () => void } & StatusViewProps) {
   return (
     <StoryScene actors={actors} mode={mode} className="choice-scene" viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus} statusRulesEnabled={statusRulesEnabled} changedStatusCharacterIds={changedStatusCharacterIds}>
       <section className="choice-overlay" aria-label="剧情选项" onClick={(event) => event.stopPropagation()}>
         <div className="selection-heading">
+          {showContinuation && <button type="button" className="continue-response-button choice-continuation-button" onClick={onContinue}><RefreshCw size={14} />从截断处补全</button>}
           <div className="selection-prompt">请选择</div>
           <button type="button" className="close-chapter-button" onClick={onCloseChapter} title="要求 AI 收尾当前章节并推进新剧情"><Flag size={15} />收尾本章节</button>
         </div>
@@ -878,16 +1117,29 @@ function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: Re
   )
 }
 
-function RawResponseDialog({ content, repairContent, onClose }: { content: string; repairContent?: string; onClose: () => void }) {
+function RawResponseDialog({ requestContent, content, repairContent, memorySummaryContent, onClose }: { requestContent: string; content: string; repairContent?: string; memorySummaryContent?: string; onClose: () => void }) {
   return (
-    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="AI 返回原文">
-      <button className="backdrop" onClick={onClose} aria-label="关闭 AI 返回原文" />
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="对话 Debug">
+      <button className="backdrop" onClick={onClose} aria-label="关闭对话 Debug" />
       <section className="modal debug-modal">
         <div className="modal-head">
-          <div><span className="eyebrow">RAW RESPONSE</span><h2>AI 返回原文</h2></div>
+          <div><span className="eyebrow">REQUEST / RESPONSE</span><h2>对话 Debug</h2></div>
           <button className="icon-button" onClick={onClose} title="关闭"><X size={20} /></button>
         </div>
-        <pre className="debug-response">{content || '当前RPG还没有 AI 返回内容。'}{repairContent ? `\n\n===== 自动补选项返回原文 =====\n${repairContent}` : ''}</pre>
+        <div className="debug-sections">
+          <section className="debug-section">
+            <h3>客户端发送的用户提示词</h3>
+            <pre className="debug-response">{requestContent || '当前RPG还没有用户提示词。'}</pre>
+          </section>
+          <section className="debug-section">
+            <h3>LLM 返回的原始输出</h3>
+            <pre className="debug-response">{content || '当前RPG还没有 LLM 返回内容。'}{repairContent ? `\n\n===== 自动补选项返回原文 =====\n${repairContent}` : ''}</pre>
+          </section>
+          <section className="debug-section">
+            <h3>记忆总结调用</h3>
+            <pre className="debug-response">{memorySummaryContent || '本轮对话没有触发记忆总结。'}</pre>
+          </section>
+        </div>
       </section>
     </div>
   )

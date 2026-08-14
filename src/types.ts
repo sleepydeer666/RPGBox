@@ -4,8 +4,10 @@ export interface ChatMessage {
   id: string
   role: Role
   content: string
+  requestContent?: string
   rawContent?: string
   repairContent?: string
+  memorySummaryDebug?: string
   chapterTitle?: string
   createdAt: number
 }
@@ -87,6 +89,7 @@ export interface ChapterMemory {
   title: string
   summary: string
   completedAt: number
+  sourceMessageIds?: string[]
 }
 
 export interface NarrativeStage {
@@ -132,6 +135,9 @@ export interface GameSession {
   systemPrompt: string
   aiSettings: GameAiSettings
   storyStylePrompt: string
+  chapterTransitionRules?: string
+  recommendedChapterTurnsEnabled?: boolean
+  recommendedChapterTurns?: number
   statusRulesPrompt?: string
   nsfwScenePrompt: string
   worldSettingPrompt: string
@@ -155,6 +161,8 @@ export interface GameData {
 export interface ParsedResponse {
   story: string
   segments: StorySegment[]
+  /** Segment indexes that begin after an invisible chapter boundary. */
+  chapterBoundaryIndexes: number[]
   choices: Choice[]
   gameData: GameData | null
   sceneChanged: boolean

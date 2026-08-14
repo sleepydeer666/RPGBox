@@ -1,6 +1,7 @@
-import { Check, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { Check, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { DEFAULT_PROVIDER } from '../config'
+import { loadBundledDefaultPrompt } from '../lib/defaultPrompt'
 import { fetchAvailableModels } from '../services/openai'
 import type { ProviderProfile } from '../types'
 
@@ -24,6 +25,8 @@ export default function GlobalSettingsDialog(props: Props) {
   const [manualModel, setManualModel] = useState('')
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState('')
+  const [defaultPromptLoading, setDefaultPromptLoading] = useState(false)
+  const [defaultPromptError, setDefaultPromptError] = useState('')
   const activeModels = active.models?.length ? active.models : active.model ? [active.model] : []
   const filteredRemoteModels = (remoteModels ?? []).filter((model) => model.toLocaleLowerCase().includes(modelSearch.trim().toLocaleLowerCase()))
 
@@ -79,6 +82,22 @@ export default function GlobalSettingsDialog(props: Props) {
     updateActive({ models: nextModels, model: active.model === model ? (nextModels[0] ?? '') : active.model })
   }
 
+  async function useDefaultPrompt() {
+    if (props.globalJailbreakPrompt.trim() && !window.confirm('这将删除现有提示词，是否继续？')) return
+    setDefaultPromptLoading(true)
+    setDefaultPromptError('')
+    try {
+      const prompt = await loadBundledDefaultPrompt()
+      if (!prompt) {
+        setDefaultPromptError('无法读取默认提示词')
+        return
+      }
+      props.onChangeGlobalJailbreakPrompt(prompt)
+    } finally {
+      setDefaultPromptLoading(false)
+    }
+  }
+
   return (
     <div className="modal-layer" role="dialog" aria-modal="true">
       <button className="backdrop" onClick={props.onClose} aria-label="关闭" />
@@ -91,8 +110,9 @@ export default function GlobalSettingsDialog(props: Props) {
           </nav>
           <div className="settings-content">
             <div className="form-section global-prompt-section">
-              <h3>全局破限提示词</h3>
+              <div className="form-section-head"><h3>全局破限提示词</h3><button type="button" className="secondary-button compact" onClick={() => void useDefaultPrompt()} disabled={defaultPromptLoading}><RotateCcw size={14} />{defaultPromptLoading ? '读取中' : '使用默认设置'}</button></div>
               <label>提示词<textarea value={props.globalJailbreakPrompt} onChange={(event) => props.onChangeGlobalJailbreakPrompt(event.target.value)} placeholder="对所有RPG生效的全局附加提示词" /></label>
+              {defaultPromptError && <div className="inline-error">{defaultPromptError}</div>}
             </div>
             <div className="form-section">
               <div className="form-section-head"><h3>API 配置</h3><button className="danger-icon" onClick={removeProvider} disabled={props.providers.length === 1} title="删除当前配置"><Trash2 size={17} /></button></div>

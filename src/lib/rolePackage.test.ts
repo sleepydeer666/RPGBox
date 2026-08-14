@@ -46,9 +46,8 @@ describe('RPGBox role package', () => {
       ],
     }))
     zip.file('portraits/normal.png', 'image-data', { base64: false })
-    const encoded = await zip.generateAsync({ type: 'base64' })
-    filesystemMocks.readFile.mockResolvedValue({ data: encoded })
-    const imported = await module.importRolePackage('lia.role.rpgbox', 'game-1', 'npc-new')
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'lia.role.rpgbox')
+    const imported = await module.importRolePackage(file, 'game-1', 'npc-new')
     expect(imported.id).toBe('npc-new')
     expect(imported.role).toBe('npc')
     expect(imported.portraits).toHaveLength(1)

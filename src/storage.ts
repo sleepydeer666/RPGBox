@@ -53,6 +53,9 @@ export async function loadState(): Promise<Partial<PersistedState>> {
         systemPrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         aiSettings: createDefaultAiSettings(fallbackProvider),
         storyStylePrompt: parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        chapterTransitionRules: '',
+        recommendedChapterTurnsEnabled: false,
+        recommendedChapterTurns: 20,
         statusRulesPrompt: '',
         nsfwScenePrompt: '',
         worldSettingPrompt: '',
@@ -88,6 +91,9 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       newStoryChoiceCount: normalizeNewStoryChoiceCount(legacy.newStoryChoiceCount),
       aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings },
       storyStylePrompt: legacy.storyStylePrompt ?? legacy.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+      chapterTransitionRules: legacy.chapterTransitionRules ?? '',
+      recommendedChapterTurnsEnabled: legacy.recommendedChapterTurnsEnabled ?? false,
+      recommendedChapterTurns: clampRecommendedChapterTurns(legacy.recommendedChapterTurns),
       statusRulesPrompt: legacy.statusRulesPrompt ?? '',
       nsfwScenePrompt: legacy.nsfwScenePrompt ?? '',
       worldSettingPrompt: legacy.worldSettingPrompt ?? '',
@@ -135,6 +141,11 @@ export async function loadState(): Promise<Partial<PersistedState>> {
   } catch {
     return {}
   }
+}
+
+function clampRecommendedChapterTurns(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 20
+  return Math.min(30, Math.max(10, Math.round(value as number)))
 }
 
 function chapterOnlyNarrative(narrative: NarrativeProgress | undefined, fallbackTitle: string, messageId: string): NarrativeProgress {

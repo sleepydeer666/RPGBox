@@ -28,4 +28,18 @@ describe('tokenizeNarrationText', () => {
       { text: '点了点头。' },
     ])
   })
+
+  it('colors a literal 你 in narration as the player character', () => {
+    const player = { id: 'player', name: '亚瑟', color: '#33aa66', role: 'player' as const }
+
+    expect(tokenizeNarrationText('维纳斯向你挥了挥手。', [
+      player,
+      { id: 'venus', name: '维纳斯', color: '#cc6699', role: 'npc' as const },
+    ])).toEqual([
+      { text: '维纳斯', character: { id: 'venus', name: '维纳斯', color: '#cc6699', role: 'npc' } },
+      { text: '向' },
+      { text: '你', character: player },
+      { text: '挥了挥手。' },
+    ])
+  })
 })

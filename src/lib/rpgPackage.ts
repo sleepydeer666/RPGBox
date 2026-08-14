@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import JSZip from 'jszip'
 import { copyPortraitFile, readPortraitBase64, savePortraitBase64 } from './portraits'
@@ -12,7 +13,7 @@ export interface RpgExportOptions {
   nsfw: boolean
 }
 
-export type RpgboxImportSource = string | File
+export type RpgboxImportSource = File
 
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
   assetPath: string
@@ -32,15 +33,6 @@ interface PackageSections {
   settings?: Record<string, unknown>
   characters?: SerializedCharacter[]
   nsfw?: { nsfwScenePrompt: string; characterSettings?: SerializedCharacterNsfwSettings[] }
-}
-
-export async function listRpgboxFiles(): Promise<string[]> {
-  await ensureRpgboxDirectory()
-  const result = await Filesystem.readdir({ path: RPGBOX_DIRECTORY, directory: Directory.Documents })
-  return result.files
-    .filter((file) => file.type === 'file' && file.name.toLocaleLowerCase().endsWith('.rpgbox') && !file.name.toLocaleLowerCase().endsWith('.role.rpgbox'))
-    .map((file) => file.name)
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
 }
 
 export async function exportRpgbox(game: GameSession, options: RpgExportOptions): Promise<string> {
@@ -63,7 +55,8 @@ export async function exportRpgbox(game: GameSession, options: RpgExportOptions)
         if (!exportedGroups.length) continue
         const extension = fileExtension(portrait.uri)
         const assetPath = `portraits/${safePathPart(character.id)}/${safePathPart(portrait.id)}.${extension}`
-        zip.file(assetPath, await readPortraitBase64(portrait.uri), { base64: true })
+        // Portraits are already compressed image files; storing them avoids a costly DEFLATE pass.
+        zip.file(assetPath, await readPortraitBase64(portrait.uri), { base64: true, compression: 'STORE' })
         const { uri: _uri, ...metadata } = portrait
         portraits.push({ ...metadata, groups: exportedGroups, assetPath })
       }
@@ -73,19 +66,54 @@ export async function exportRpgbox(game: GameSession, options: RpgExportOptions)
   }
 
   zip.file('rpg.xml', createRpgboxXml(game.title, sections))
-  const data = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } })
   await ensureRpgboxDirectory()
   const fileName = `${safeFileName(game.title || '未命名RPG')}-${fileStamp()}.rpgbox`
-  await Filesystem.writeFile({ path: `${RPGBOX_DIRECTORY}/${fileName}`, data, directory: Directory.Documents, recursive: true })
+  const path = `${RPGBOX_DIRECTORY}/${fileName}`
+  if (Capacitor.isNativePlatform()) {
+    await writeZipInChunks(zip, path)
+  } else {
+    const data = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+    await Filesystem.writeFile({ path, data, directory: Directory.Documents, recursive: true })
+  }
   return `${RPGBOX_DIRECTORY_LABEL}/${fileName}`
 }
 
+async function writeZipInChunks(zip: JSZip, path: string): Promise<void> {
+  const stream = zip.generateInternalStream({ type: 'uint8array', streamFiles: true, compression: 'STORE' })
+  await new Promise<void>((resolve, reject) => {
+    let firstChunk = true
+    let settled = false
+    const fail = (error: unknown) => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
+    stream.on('data', (chunk) => {
+      stream.pause()
+      const data = encodeBase64Bytes(chunk)
+      const write = firstChunk
+        ? Filesystem.writeFile({ path, data, directory: Directory.Documents, recursive: true })
+        : Filesystem.appendFile({ path, data, directory: Directory.Documents })
+      write.then(() => {
+        firstChunk = false
+        stream.resume()
+      }).catch(fail)
+    })
+    stream.on('error', fail)
+    stream.on('end', () => {
+      if (!settled) {
+        settled = true
+        resolve()
+      }
+    })
+    stream.resume()
+  })
+}
+
 export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession): Promise<GameSession> {
-  const fileName = typeof source === 'string' ? source : source.name
+  const fileName = source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
-  const zip = typeof source === 'string'
-    ? await loadFilesystemZip(`${RPGBOX_DIRECTORY}/${fileName}`)
-    : await JSZip.loadAsync(await source.arrayBuffer())
+  const zip = await JSZip.loadAsync(await source.arrayBuffer())
   const xmlFile = zip.file('rpg.xml')
   if (!xmlFile) throw new Error('RPGBox 文件缺少 rpg.xml')
   const sections = parseRpgboxXml(await xmlFile.async('string'))
@@ -119,12 +147,6 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
   }
 
   return { ...game, id: baseGame.id, title: baseGame.title, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) }
-}
-
-async function loadFilesystemZip(path: string) {
-  const file = await Filesystem.readFile({ path, directory: Directory.Documents })
-  const base64 = typeof file.data === 'string' ? file.data : await blobToBase64(file.data)
-  return JSZip.loadAsync(base64, { base64: true })
 }
 
 export async function cloneGameSession(game: GameSession, id: string, title: string): Promise<GameSession> {
@@ -170,6 +192,9 @@ function exportSettings(game: GameSession): Record<string, unknown> {
     nsfwEnabled: game.nsfwEnabled,
     newStoryChoiceCount: game.newStoryChoiceCount,
     storyStylePrompt: game.storyStylePrompt,
+    chapterTransitionRules: game.chapterTransitionRules ?? '',
+    recommendedChapterTurnsEnabled: game.recommendedChapterTurnsEnabled ?? false,
+    recommendedChapterTurns: game.recommendedChapterTurns ?? 20,
     statusRulesPrompt: game.statusRulesPrompt ?? '',
     worldSettingPrompt: game.worldSettingPrompt,
     messages: game.messages,
@@ -181,11 +206,15 @@ function exportSettings(game: GameSession): Record<string, unknown> {
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'nsfwEnabled', 'newStoryChoiceCount', 'storyStylePrompt', 'statusRulesPrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const allowed = ['systemPrompt', 'nsfwEnabled', 'newStoryChoiceCount', 'storyStylePrompt', 'chapterTransitionRules', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
   const imported = Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
   if (settings.newStoryChoiceCount !== undefined) {
     const parsed = Number(settings.newStoryChoiceCount)
     imported.newStoryChoiceCount = Number.isFinite(parsed) ? Math.min(10, Math.max(4, Math.round(parsed))) : 4
+  }
+  if (settings.recommendedChapterTurns !== undefined) {
+    const parsed = Number(settings.recommendedChapterTurns)
+    imported.recommendedChapterTurns = Number.isFinite(parsed) ? Math.min(30, Math.max(10, Math.round(parsed))) : 20
   }
   return imported
 }
@@ -201,6 +230,12 @@ async function ensureRpgboxDirectory() {
 
 function encodeBase64Utf8(value: string): string {
   const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  return btoa(binary)
+}
+
+function encodeBase64Bytes(bytes: Uint8Array): string {
   let binary = ''
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
   return btoa(binary)
@@ -230,15 +265,4 @@ function fileExtension(path: string): string {
 
 function fileStamp(): string {
   return new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, '').replace('T', '-')
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => typeof reader.result === 'string'
-      ? resolve(reader.result.slice(reader.result.indexOf(',') + 1))
-      : reject(new Error('无法读取 RPGBox 文件'))
-    reader.onerror = () => reject(reader.error ?? new Error('无法读取 RPGBox 文件'))
-    reader.readAsDataURL(blob)
-  })
 }

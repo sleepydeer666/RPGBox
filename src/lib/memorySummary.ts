@@ -13,11 +13,15 @@ export const DISTANT_SUMMARY_SYSTEM_PROMPT = `你是 RPGBox 的远期记忆压�
 
 const INVALID_META_PATTERN = /(?:looking at your task|i(?:'ll| will) create|web\s*page|网页(?:页面|布局|设计|方案)|html|markdown|代码块|制作计划|任务类型|无法协助)/iu
 
+export function normalizeMemorySummaryOutput(summary: string): string {
+  return summary.trim().replace(/\s*[\r\n]+\s*/gu, ' ')
+}
+
 export function isValidChapterSummary(summary: string): boolean {
   const text = summary.trim()
   return text.startsWith('本章摘要：')
     && /[\u3400-\u9fff]/u.test(text)
-    && text.length >= 30
+    && text.length >= 10
     && text.length <= 1200
     && !/[\r\n]/u.test(text)
     && !INVALID_META_PATTERN.test(text)

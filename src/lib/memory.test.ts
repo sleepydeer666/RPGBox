@@ -19,6 +19,16 @@ describe('chapter memory model', () => {
     expect(text).toContain('### 当前章节（进行中）\n当前事件')
   })
 
+  it('keeps failed empty chapter placeholders out of the system prompt', () => {
+    const text = formatRecentChapterMemories(normalizeMemoryState({
+      currentChapterSummary: '',
+      historicalSummary: '',
+      recentChapters: [{ id: 'failed', title: '未完成总结的章节', summary: '', completedAt: 1 }],
+    }))
+
+    expect(text).toBe('暂无主记忆。')
+  })
+
   it('clamps the configurable recent chapter count', () => {
     expect(clampRecentChapterLimit(undefined)).toBe(5)
     expect(clampRecentChapterLimit(0)).toBe(1)

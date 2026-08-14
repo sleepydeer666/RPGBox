@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { completeStreamingLines, resolvePlayback } from './playback'
+import { completeStreamingLines, reachedChapterBoundaryStart, resolvePlayback } from './playback'
 
 describe('resolvePlayback', () => {
   it('does not follow newly streamed segments automatically', () => {
@@ -33,5 +33,17 @@ describe('completeStreamingLines', () => {
   it('hides the unfinished trailing line until a line break arrives', () => {
     expect(completeStreamingLines('[状态] 模式：常规；地点：旅店；时间：夜晚；场景：延续\n维纳斯（开心）：你')).toBe('[状态] 模式：常规；地点：旅店；时间：夜晚；场景：延续\n')
     expect(completeStreamingLines('维纳斯（开心）：你好\n')).toBe('维纳斯（开心）：你好\n')
+  })
+})
+
+describe('reachedChapterBoundaryStart', () => {
+  it('crosses a boundary only when playback enters the following content', () => {
+    expect(reachedChapterBoundaryStart([2], 1, false)).toBeUndefined()
+    expect(reachedChapterBoundaryStart([2], 2, false)).toBe(2)
+  })
+
+  it('crosses a trailing boundary when playback reaches post-story choices', () => {
+    expect(reachedChapterBoundaryStart([2], 1, false)).toBeUndefined()
+    expect(reachedChapterBoundaryStart([2], 1, true)).toBe(2)
   })
 })
