@@ -33,7 +33,7 @@ interface SerializedCharacterNsfwSettings {
   nsfwDescription: string
 }
 
-interface PackageSections {
+export interface PackageSections {
   settings?: Record<string, unknown>
   characters?: SerializedCharacter[]
   nsfw?: { nsfwScenePrompt: string; characterSettings?: SerializedCharacterNsfwSettings[] }
@@ -122,6 +122,19 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
   const xmlFile = zip.file('rpg.xml')
   if (!xmlFile) throw new Error('RPGBox 文件缺少 rpg.xml')
   const sections = parseRpgboxXml(await xmlFile.async('string'))
+  return importRpgboxSections(sections, baseGame, options, async (characterId, assetPath) => {
+    const asset = zip.file(assetPath)
+    if (!asset) return undefined
+    return savePortraitBase64(baseGame.id, characterId, await asset.async('base64'), fileExtension(assetPath))
+  })
+}
+
+export async function importRpgboxSections(
+  sections: PackageSections,
+  baseGame: GameSession,
+  options: RpgboxImportOptions = {},
+  importPortrait?: (characterId: string, assetPath: string) => Promise<string | undefined>,
+): Promise<GameSession> {
   let game: GameSession = { ...baseGame }
 
   if (sections.settings) game = { ...game, ...importSettings(sections.settings) }
@@ -135,9 +148,8 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
       for (const portrait of character.portraits ?? []) {
         if (!portrait.assetPath.startsWith('portraits/') || portrait.assetPath.includes('..')) continue
         const { assetPath, ...metadata } = portrait
-        const asset = zip.file(portrait.assetPath)
-        if (!asset) continue
-        const uri = await savePortraitBase64(baseGame.id, character.id, await asset.async('base64'), fileExtension(assetPath))
+        const uri = await importPortrait?.(character.id, assetPath)
+        if (!uri) continue
         portraits.push({ ...metadata, uri })
         portraitCompleted += 1
         options.onPortraitProgress?.(portraitCompleted, portraitTotal)

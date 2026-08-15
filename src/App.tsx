@@ -200,15 +200,26 @@ function App() {
       })
       const newPackages = bundledPackages.filter((item) => !importedKeys.includes(item.key))
       const nextImportedKeys = Array.from(new Set([...importedKeys, ...bundledPackages.map((item) => item.key)]))
+      const nextProviders = saved.providers?.length ? saved.providers : providers
+      const nextActiveProviderId = saved.activeProviderId || activeProviderId
+      const nextGlobalJailbreakPrompt = saved.globalJailbreakPrompt ?? globalJailbreakPrompt
+      const nextGames = [...(saved.games ?? []), ...newPackages.map((item) => item.game)]
+      const nextActiveGameId = saved.activeGameId && nextGames.some((game) => game.id === saved.activeGameId)
+        ? saved.activeGameId
+        : nextGames[0]?.id ?? ''
+
+      // Commit the imported games and their import keys before dismissing progress.
+      await saveState({
+        providers: nextProviders,
+        activeProviderId: nextActiveProviderId,
+        globalJailbreakPrompt: nextGlobalJailbreakPrompt,
+        games: nextGames,
+        activeGameId: nextActiveGameId,
+        bundledRpgImportKeys: nextImportedKeys,
+      })
       setBundledRpgImportKeys(nextImportedKeys)
-      if (saved.games?.length) {
-        setGames([...saved.games, ...newPackages.map((item) => item.game)])
-        if (saved.activeGameId) setActiveGameId(saved.activeGameId)
-      } else if (newPackages.length) {
-        const bundledGames = newPackages.map((item) => item.game)
-        setGames(bundledGames)
-        setActiveGameId(bundledGames[0].id)
-      }
+      setGames(nextGames)
+      setActiveGameId(nextActiveGameId)
       setBundledImportStatus((current) => ({ ...current, active: false }))
       setHydrated(true)
     })
