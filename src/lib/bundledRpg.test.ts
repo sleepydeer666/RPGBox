@@ -22,17 +22,17 @@ describe('bundled RPG loading', () => {
 
   it('returns no games when the build contains no bundled RPG assets', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ packages: [] }) }))
-    const { loadBundledRpgs } = await import('./bundledRpg')
+    const { listBundledRpgPresets } = await import('./bundledRpg')
 
-    await expect(loadBundledRpgs()).resolves.toEqual([])
+    await expect(listBundledRpgPresets()).resolves.toEqual([])
     expect(importMocks.importRpgboxSections).not.toHaveBeenCalled()
   })
 
-  it('loads extracted XML and portraits one asset at a time', async () => {
+  it('imports only the selected preset and loads portraits one asset at a time', async () => {
     const sections = { characters: [] }
     const importedGame = { id: 'new-game', title: 'New RPG' }
     const responses = [
-      { ok: true, json: async () => ({ packages: [{ key: 'file:sample.rpgbox', fileName: 'Sample_v2.rpgbox', xmlUrl: '/bundled-rpg/package-1/rpg.xml', portraits: { 'portraits/hero/normal.png': '/bundled-rpg/package-1/portraits/hero/normal.png' } }] }) },
+      { ok: true, json: async () => ({ packages: [{ key: 'file:sample.rpgbox', fileName: 'Sample_v2.rpgbox', title: 'Sample Preset', hasNsfw: true, xmlUrl: '/bundled-rpg/package-1/rpg.xml', portraits: { 'portraits/hero/normal.png': '/bundled-rpg/package-1/portraits/hero/normal.png' } }] }) },
       { ok: true, text: async () => '<rpgbox />' },
       { ok: true, blob: async () => new Blob(['portrait']) },
     ]
@@ -41,17 +41,18 @@ describe('bundled RPG loading', () => {
     importMocks.parseRpgboxXml.mockReturnValue(sections)
     importMocks.savePortraitFile.mockResolvedValue('file:///portrait.png')
     importMocks.importRpgboxSections.mockImplementation(async (_sections, _blank, options, importPortrait) => {
+      options.onPortraitProgress(0, 1)
       const uri = await importPortrait('hero', 'portraits/hero/normal.png')
       options.onPortraitProgress(1, 1)
       expect(uri).toBe('file:///portrait.png')
       return importedGame
     })
 
-    const { loadBundledRpgs } = await import('./bundledRpg')
+    const { importBundledRpg } = await import('./bundledRpg')
     const progress = vi.fn()
-    const result = await loadBundledRpgs(undefined, progress)
+    const result = await importBundledRpg('file:sample.rpgbox', undefined, progress)
 
-    expect(result).toEqual([{ key: 'file:sample.rpgbox', fileName: 'Sample_v2.rpgbox', game: { ...importedGame, title: 'Sample' } }])
+    expect(result).toEqual({ key: 'file:sample.rpgbox', fileName: 'Sample_v2.rpgbox', game: { ...importedGame, title: 'Sample Preset' } })
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/bundled-rpg/manifest.json',
       '/bundled-rpg/package-1/rpg.xml',
@@ -59,6 +60,7 @@ describe('bundled RPG loading', () => {
     ])
     expect(importMocks.parseRpgboxXml).toHaveBeenCalledWith('<rpgbox />')
     expect(importMocks.savePortraitFile).toHaveBeenCalledOnce()
-    expect(progress).toHaveBeenLastCalledWith('Sample_v2.rpgbox', 1, 1, '立绘 1 / 1')
+    expect(progress).toHaveBeenNthCalledWith(1, 0, 1)
+    expect(progress).toHaveBeenLastCalledWith(1, 1)
   })
 })

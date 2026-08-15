@@ -103,4 +103,18 @@ describe('RPGBox XML manifest', () => {
     expect(imported.storyStylePrompt).toBe('直接读取')
     expect(filesystemMocks.readFile).not.toHaveBeenCalled()
   })
+
+  it('automatically enables NSFW when the imported package contains NSFW settings', async () => {
+    const zip = new JSZip()
+    zip.file('rpg.xml', createRpgboxXml('NSFW RPG', {
+      settings: { nsfwEnabled: false },
+      nsfw: { nsfwScenePrompt: 'package NSFW settings' },
+    }))
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'nsfw.rpgbox')
+
+    const imported = await importRpgbox(file, createBlankGame(1))
+
+    expect(imported.nsfwEnabled).toBe(true)
+    expect(imported.nsfwScenePrompt).toBe('package NSFW settings')
+  })
 })

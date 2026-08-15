@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createBlankGame } from '../game'
-import { inspectLatestResponseCompletion, mergeContinuationResponse } from './responseCompletion'
+import { inspectLatestResponseCompletion, mergeContinuationResponse, mergeContinuationResponseResult } from './responseCompletion'
 
 function gameWithResponse(content: string, statusRulesPrompt = '') {
   const game = createBlankGame(1)
@@ -64,6 +64,79 @@ describe('inspectLatestResponseCompletion', () => {
 })
 
 describe('mergeContinuationResponse', () => {
+  it('replaces an exact duplicated line and everything after it', () => {
+    const result = mergeContinuationResponseResult(
+      '[旁白] 第一行\n[旁白] 第二行\n[旁白] 第三行的一半',
+      '[旁白] 第二行\n[旁白] 第三行完整\n[旁白] 第四行',
+    )
+
+    expect(result).toEqual({
+      text: '[旁白] 第一行\n[旁白] 第二行\n[旁白] 第三行完整\n[旁白] 第四行',
+      aligned: true,
+      spliceOffset: '[旁白] 第一行\n'.length,
+    })
+  })
+
+  it('replaces a truncated final line when it prefixes the first complete continuation line', () => {
+    const result = mergeContinuationResponseResult(
+      '[旁白] 第一行\n[旁白] 被截断',
+      '[旁白] 被截断的句子已经完整\n[旁白] 下一行',
+    )
+
+    expect(result.text).toBe('[旁白] 第一行\n[旁白] 被截断的句子已经完整\n[旁白] 下一行')
+    expect(result.spliceOffset).toBe('[旁白] 第一行\n'.length)
+  })
+
+  it('uses an earlier old line as a prefix match while searching backward', () => {
+    const result = mergeContinuationResponseResult(
+      '[旁白] 第一行\n[旁白] 旧行前缀\n[旁白] 后续残句',
+      '[旁白] 旧行前缀和补全内容\n[旁白] 新结尾',
+    )
+
+    expect(result.text).toBe('[旁白] 第一行\n[旁白] 旧行前缀和补全内容\n[旁白] 新结尾')
+  })
+
+  it('chooses the nearest duplicated line when the old response contains several matches', () => {
+    const original = '[旁白] 重复\n[旁白] 中间\n[旁白] 重复\n[旁白] 末尾残句'
+    const result = mergeContinuationResponseResult(original, '[旁白] 重复\n[旁白] 新内容')
+
+    expect(result.text).toBe('[旁白] 重复\n[旁白] 中间\n[旁白] 重复\n[旁白] 新内容')
+    expect(result.spliceOffset).toBe(original.lastIndexOf('[旁白] 重复'))
+  })
+
+  it('waits for the first complete continuation line before aligning', () => {
+    expect(mergeContinuationResponseResult('[旁白] 原文', '[旁白] 原文')).toEqual({
+      text: '[旁白] 原文',
+      aligned: false,
+    })
+  })
+
+  it('aligns a final continuation line even without a trailing line break', () => {
+    expect(mergeContinuationResponseResult('[旁白] 第一行\n[旁白] 第二', '[旁白] 第二行完整', { final: true })).toEqual({
+      text: '[旁白] 第一行\n[旁白] 第二行完整',
+      aligned: true,
+      spliceOffset: '[旁白] 第一行\n'.length,
+    })
+  })
+
+  it('falls back to the existing merge behavior when no complete line matches', () => {
+    expect(mergeContinuationResponseResult('[旁白] 原文。', '[旁白] 新内容\n[选项A] 前进')).toEqual({
+      text: '[旁白] 原文。\n[旁白] 新内容\n[选项A] 前进',
+      aligned: false,
+    })
+  })
+
+  it('keeps using a locked splice offset for later streaming updates', () => {
+    const original = '[旁白] 第一行\n[旁白] 第二行\n[旁白] 残句'
+    const first = mergeContinuationResponseResult(original, '[旁白] 第二行\n[旁白] 新')
+    const later = mergeContinuationResponseResult(original, '[旁白] 第二行\n[旁白] 新内容\n[选项A] 前进', {
+      spliceOffset: first.spliceOffset,
+    })
+
+    expect(later.spliceOffset).toBe(first.spliceOffset)
+    expect(later.text).toBe('[旁白] 第一行\n[旁白] 第二行\n[旁白] 新内容\n[选项A] 前进')
+  })
+
   it('removes the longest repeated boundary before appending', () => {
     expect(mergeContinuationResponse(
       '[旁白] 门缓缓打开。\n[选项A] 进入房',

@@ -30,6 +30,8 @@ function bundledRpgAssets() {
       const packages = [] as Array<{
         key: string
         fileName: string
+        title: string
+        hasNsfw: boolean
         xmlUrl: string
         portraits: Record<string, string>
       }>
@@ -38,9 +40,10 @@ function bundledRpgAssets() {
         const zip = await JSZip.loadAsync(readFileSync(resolve(sourceDirectory, fileName)))
         const xml = zip.file('rpg.xml')
         if (!xml) throw new Error(`${fileName} is missing rpg.xml`)
+        const xmlText = await xml.async('string')
         const packageDirectory = `bundled-rpg/package-${index + 1}`
         const xmlFileName = `${packageDirectory}/rpg.xml`
-        this.emitFile({ type: 'asset', fileName: xmlFileName, source: await xml.async('uint8array') })
+        this.emitFile({ type: 'asset', fileName: xmlFileName, source: xmlText })
         const portraits: Record<string, string> = {}
         for (const entry of Object.values(zip.files)) {
           if (entry.dir || !entry.name.startsWith('portraits/') || entry.name.includes('..')) continue
@@ -48,7 +51,14 @@ function bundledRpgAssets() {
           this.emitFile({ type: 'asset', fileName: assetFileName, source: await entry.async('uint8array') })
           portraits[entry.name] = `/${assetFileName}`
         }
-        packages.push({ key: `file:${fileName}`, fileName, xmlUrl: `/${xmlFileName}`, portraits })
+        packages.push({
+          key: `file:${fileName}`,
+          fileName,
+          title: decodeXmlAttribute(xmlText.match(/<rpgbox\b[^>]*\btitle="([^"]*)"/u)?.[1] ?? fileName.replace(/\.rpgbox$/iu, '')),
+          hasNsfw: /<section\s+name="nsfw"\s/u.test(xmlText),
+          xmlUrl: `/${xmlFileName}`,
+          portraits,
+        })
       }
 
       this.emitFile({
@@ -58,6 +68,15 @@ function bundledRpgAssets() {
       })
     },
   }
+}
+
+function decodeXmlAttribute(value: string): string {
+  return value
+    .replace(/&quot;/gu, '"')
+    .replace(/&apos;/gu, "'")
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&amp;/gu, '&')
 }
 
 export default defineConfig({

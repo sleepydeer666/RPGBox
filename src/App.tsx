@@ -10,7 +10,7 @@ import { loadBundledDefaultPrompt, resolveGlobalJailbreakPrompt } from './lib/de
 import { latestDebugExchange } from './lib/debugExchange'
 import { resolveCharacterExpression } from './lib/expressions'
 import { buildHistoryLines } from './lib/history'
-import { loadBundledRpgs } from './lib/bundledRpg'
+import { importBundledRpg, listBundledRpgPresets, type BundledRpgPreset } from './lib/bundledRpg'
 import { closesChapter, currentChapterSummary, normalizeMemoryState, partitionRecentChapterMemories, recentChapterMemories } from './lib/memory'
 import { CHAPTER_SUMMARY_SYSTEM_PROMPT, DISTANT_SUMMARY_SYSTEM_PROMPT, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './lib/memorySummary'
 import { normalizeProtocolResponse, parseAssistantResponse, standardResponse, visibleStory } from './lib/parser'
@@ -19,7 +19,7 @@ import { portraitSource } from './lib/portraits'
 import { deletePortraitFile } from './lib/portraits'
 import { cloneGameSession, exportRpgbox, importRpgbox, type RpgboxImportSource, type RpgExportOptions } from './lib/rpgPackage'
 import { buildSystemPrompt, takeRecentConversationTurns, toApiMessages } from './lib/prompt'
-import { inspectLatestResponseCompletion, mergeContinuationResponse } from './lib/responseCompletion'
+import { inspectLatestResponseCompletion, mergeContinuationResponseResult } from './lib/responseCompletion'
 import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback } from './lib/rollback'
 import { applyRpgStatePatch } from './lib/state'
 import { collectRecentActors, collectTurnActors, includeActiveSpeaker, type StageActor, type StageTurn } from './lib/stage'
@@ -55,6 +55,7 @@ function App() {
   const [games, setGames] = useState<GameSession[]>([])
   const [activeGameId, setActiveGameId] = useState('')
   const [bundledRpgImportKeys, setBundledRpgImportKeys] = useState<string[]>([])
+  const [bundledRpgPresets, setBundledRpgPresets] = useState<BundledRpgPreset[]>([])
   const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({})
   const [selectedChoices, setSelectedChoices] = useState<string[]>([])
   const [customInput, setCustomInput] = useState('')
@@ -71,7 +72,6 @@ function App() {
   const [summarizingMemory, setSummarizingMemory] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [hydrated, setHydrated] = useState(false)
-  const [bundledImportStatus, setBundledImportStatus] = useState({ active: true, current: '', index: 0, total: 0 })
   const abortRef = useRef<AbortController | null>(null)
 
   const activeGame = games.find((game) => game.id === activeGameId) ?? games[0] ?? fallbackGame
@@ -188,41 +188,19 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void loadState().then(async (saved) => {
+    void loadState().then((saved) => {
       if (saved.providers?.length) setProviders(saved.providers)
       if (saved.activeProviderId) setActiveProviderId(saved.activeProviderId)
       if (saved.globalJailbreakPrompt) setGlobalJailbreakPrompt(saved.globalJailbreakPrompt)
-      const provider = saved.providers?.find((item) => item.id === saved.activeProviderId) ?? saved.providers?.[0]
-      const importedKeys = saved.bundledRpgImportKeys ?? []
-      setBundledImportStatus({ active: true, current: '', index: 0, total: 0 })
-      const bundledPackages = await loadBundledRpgs(provider, (current, index, total, detail) => {
-        setBundledImportStatus({ active: true, current: detail ? `${current} · ${detail}` : current, index, total })
-      })
-      const newPackages = bundledPackages.filter((item) => !importedKeys.includes(item.key))
-      const nextImportedKeys = Array.from(new Set([...importedKeys, ...bundledPackages.map((item) => item.key)]))
-      const nextProviders = saved.providers?.length ? saved.providers : providers
-      const nextActiveProviderId = saved.activeProviderId || activeProviderId
-      const nextGlobalJailbreakPrompt = saved.globalJailbreakPrompt ?? globalJailbreakPrompt
-      const nextGames = [...(saved.games ?? []), ...newPackages.map((item) => item.game)]
-      const nextActiveGameId = saved.activeGameId && nextGames.some((game) => game.id === saved.activeGameId)
-        ? saved.activeGameId
-        : nextGames[0]?.id ?? ''
-
-      // Commit the imported games and their import keys before dismissing progress.
-      await saveState({
-        providers: nextProviders,
-        activeProviderId: nextActiveProviderId,
-        globalJailbreakPrompt: nextGlobalJailbreakPrompt,
-        games: nextGames,
-        activeGameId: nextActiveGameId,
-        bundledRpgImportKeys: nextImportedKeys,
-      })
-      setBundledRpgImportKeys(nextImportedKeys)
-      setGames(nextGames)
-      setActiveGameId(nextActiveGameId)
-      setBundledImportStatus((current) => ({ ...current, active: false }))
+      setBundledRpgImportKeys(saved.bundledRpgImportKeys ?? [])
+      setGames(saved.games ?? [])
+      setActiveGameId(saved.activeGameId ?? saved.games?.[0]?.id ?? '')
       setHydrated(true)
     })
+  }, [])
+
+  useEffect(() => {
+    void listBundledRpgPresets().then(setBundledRpgPresets)
   }, [])
 
   useEffect(() => {
@@ -266,14 +244,20 @@ function App() {
     })
   }
 
-  async function createGame(title: string, importSource: RpgboxImportSource | null, nsfwEnabled: boolean) {
+  async function createGame(
+    title: string,
+    importSource: RpgboxImportSource | null,
+    nsfwEnabled: boolean,
+    onPortraitProgress?: (completed: number, total: number) => void,
+  ) {
     const blank = createBlankGame(games.length + 1, configuredProvider)
-    const imported = importSource ? await importRpgbox(importSource, blank) : blank
+    const imported = importSource ? await importRpgbox(importSource, blank, { onPortraitProgress }) : blank
+    const resolvedNsfwEnabled = nsfwEnabled || imported.nsfwEnabled
     const game = {
       ...imported,
       title: title.trim() || importSource?.name.replace(/\.rpgbox$/iu, '').trim() || blank.title,
-      nsfwEnabled,
-      gameState: nsfwEnabled ? imported.gameState : { ...imported.gameState, contentMode: 'normal' as const },
+      nsfwEnabled: resolvedNsfwEnabled,
+      gameState: resolvedNsfwEnabled ? imported.gameState : { ...imported.gameState, contentMode: 'normal' as const },
       updatedAt: Date.now(),
     }
     setGames((current) => [...current, game])
@@ -284,6 +268,22 @@ function App() {
     setSelectedChoices([])
     setCustomInput('')
     setGameDrawerOpen(false)
+  }
+
+  async function importPreset(key: string, onPortraitProgress?: (completed: number, total: number) => void) {
+    const imported = await importBundledRpg(key, configuredProvider, onPortraitProgress)
+    const game = { ...imported.game, updatedAt: Date.now() }
+    const nextGames = [...games, game]
+    const nextImportedKeys = Array.from(new Set([...bundledRpgImportKeys, imported.key]))
+    await saveState({ providers, activeProviderId, globalJailbreakPrompt, games: nextGames, activeGameId: game.id, bundledRpgImportKeys: nextImportedKeys })
+    setGames(nextGames)
+    setActiveGameId(game.id)
+    setBundledRpgImportKeys(nextImportedKeys)
+    const latest = [...game.messages].reverse().find((message) => message.role === 'assistant')
+    const parsed = parseAssistantResponse(latest?.content ?? '', { characters: game.characters })
+    setSegmentPositions((current) => ({ ...current, [game.id]: Math.max(0, parsed.segments.length - 1) }))
+    setSelectedChoices([])
+    setCustomInput('')
   }
 
   async function deleteGame(gameId: string) {
@@ -550,6 +550,18 @@ function App() {
     setError('')
     setContinuingResponse(true)
     setBusy(true)
+    let continuationSpliceOffset: number | undefined
+    let soughtContinuationSplice = false
+    const seekToContinuationSplice = (mergedRaw: string, spliceOffset: number) => {
+      if (soughtContinuationSplice) return
+      const firstContinuationLineEnd = mergedRaw.indexOf('\n', spliceOffset)
+      const spliceSegmentIndex = Math.max(0, parseAssistantResponse(
+        mergedRaw.slice(0, firstContinuationLineEnd < 0 ? mergedRaw.length : firstContinuationLineEnd + 1),
+        parseContext,
+      ).segments.length - 1)
+      soughtContinuationSplice = true
+      setSegmentPositions((current) => ({ ...current, [gameId]: spliceSegmentIndex }))
+    }
 
     try {
       const continuation = await streamCompletion({
@@ -560,17 +572,30 @@ function App() {
         ),
         signal: controller.signal,
         onToken: (content) => {
-          const mergedRaw = mergeContinuationResponse(originalRaw, content)
+          const merge = mergeContinuationResponseResult(originalRaw, content, {
+            spliceOffset: continuationSpliceOffset,
+          })
+          if (merge.aligned && merge.spliceOffset !== undefined) {
+            continuationSpliceOffset = merge.spliceOffset
+            seekToContinuationSplice(merge.text, merge.spliceOffset)
+          }
           updateGame(gameId, (game) => ({
             ...game,
             messages: game.messages.map((message) => message.id === assistantMessage.id
-              ? { ...message, content: standardResponse(mergedRaw, { characters: gameSnapshot.characters }), rawContent: mergedRaw }
+              ? { ...message, content: standardResponse(merge.text, { characters: gameSnapshot.characters }), rawContent: merge.text }
               : message),
             updatedAt: Date.now(),
           }))
         },
       })
-      const mergedRaw = mergeContinuationResponse(originalRaw, continuation)
+      const finalMerge = mergeContinuationResponseResult(originalRaw, continuation, {
+        final: true,
+        spliceOffset: continuationSpliceOffset,
+      })
+      if (finalMerge.aligned && finalMerge.spliceOffset !== undefined) {
+        seekToContinuationSplice(finalMerge.text, finalMerge.spliceOffset)
+      }
+      const mergedRaw = finalMerge.text
       const parsed = parseAssistantResponse(mergedRaw, { characters: gameSnapshot.characters })
       const reportedChapter = reportedChapterTitle(parsed)
       const turnChapter = reportedChapter ?? assistantMessage.chapterTitle ?? gameSnapshot.narrative.chapter.title
@@ -804,9 +829,12 @@ function App() {
       onDelete: deleteGame,
       onClone: cloneGame,
       onExport: exportGame,
+      bundledRpgPresets,
+      bundledRpgImportKeys,
+      onImportBundledRpg: importPreset,
       onOpenSettings: () => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) },
     }
-    return <><EmptyLibraryScreen loading={!hydrated} importStatus={bundledImportStatus} onOpenLibrary={() => setGameDrawerOpen(true)} drawerProps={drawerProps} />{globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}</>
+    return <><EmptyLibraryScreen loading={!hydrated} onOpenLibrary={() => setGameDrawerOpen(true)} drawerProps={drawerProps} />{globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}</>
   }
 
   return (
@@ -873,7 +901,7 @@ function App() {
         </footer>
       </main>
 
-      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} />
+      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} />
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
@@ -884,15 +912,11 @@ function App() {
   )
 }
 
-function EmptyLibraryScreen({ loading, importStatus, onOpenLibrary, drawerProps }: {
+function EmptyLibraryScreen({ loading, onOpenLibrary, drawerProps }: {
   loading: boolean
-  importStatus: { active: boolean; current: string; index: number; total: number }
   onOpenLibrary: () => void
   drawerProps: GameDrawerProps
 }) {
-  const currentName = importStatus.current.replace(/\.rpgbox$/iu, '')
-  const progress = importStatus.total ? Math.round(importStatus.index / importStatus.total * 100) : 0
-
   return (
     <div className="app-shell empty-library-shell">
       <header className="topbar">
@@ -903,12 +927,8 @@ function EmptyLibraryScreen({ loading, importStatus, onOpenLibrary, drawerProps 
         {loading ? (
           <section className="library-state" aria-live="polite">
             <RefreshCw className="library-state-spinner" size={28} aria-hidden="true" />
-            <h1>正在导入预设 RPG，请稍候</h1>
-            <p>{currentName || '正在检查预设 RPG'}</p>
-            {importStatus.total > 0 && <>
-              <div className="library-import-progress" aria-label={`导入进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
-              <small>{importStatus.index} / {importStatus.total}</small>
-            </>}
+            <h1>正在加载 RPG 数据</h1>
+            <p>请稍候</p>
           </section>
         ) : (
           <section className="library-state">

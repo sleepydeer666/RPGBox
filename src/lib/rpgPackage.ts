@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import JSZip from 'jszip'
-import { copyPortraitFile, readPortraitBase64, savePortraitBase64 } from './portraits'
+import { copyPortraitFile, readPortraitBase64, savePortraitFile } from './portraits'
 import type { CharacterProfile, GameSession, PortraitGroup } from '../types'
 
 export const RPGBOX_DIRECTORY = 'RPGBox'
@@ -117,16 +117,24 @@ async function writeZipInChunks(zip: JSZip, path: string): Promise<void> {
 export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession, options: RpgboxImportOptions = {}): Promise<GameSession> {
   const fileName = source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
-  const zipInput = typeof window === 'undefined' ? await source.arrayBuffer() : source
-  const zip = await JSZip.loadAsync(zipInput)
-  const xmlFile = zip.file('rpg.xml')
-  if (!xmlFile) throw new Error('RPGBox 文件缺少 rpg.xml')
-  const sections = parseRpgboxXml(await xmlFile.async('string'))
-  return importRpgboxSections(sections, baseGame, options, async (characterId, assetPath) => {
-    const asset = zip.file(assetPath)
-    if (!asset) return undefined
-    return savePortraitBase64(baseGame.id, characterId, await asset.async('base64'), fileExtension(assetPath))
-  })
+  const { BlobReader, BlobWriter, TextWriter, ZipReader } = await import('@zip.js/zip.js')
+  const zip = new ZipReader(new BlobReader(source), { useWebWorkers: false })
+  try {
+    const entries = await zip.getEntries()
+    const files = new Map(entries.filter((entry) => !entry.directory).map((entry) => [entry.filename, entry]))
+    const xmlFile = files.get('rpg.xml')
+    if (!xmlFile || xmlFile.directory) throw new Error('RPGBox 文件缺少 rpg.xml')
+    const sections = parseRpgboxXml(await xmlFile.getData(new TextWriter()))
+    return importRpgboxSections(sections, baseGame, options, async (characterId, assetPath) => {
+      const asset = files.get(assetPath)
+      if (!asset || asset.directory) return undefined
+      const blob = await asset.getData(new BlobWriter())
+      const fileName = assetPath.split('/').at(-1) ?? 'portrait.png'
+      return savePortraitFile(baseGame.id, characterId, new File([blob], fileName))
+    })
+  } finally {
+    await zip.close()
+  }
 }
 
 export async function importRpgboxSections(
@@ -138,11 +146,15 @@ export async function importRpgboxSections(
   let game: GameSession = { ...baseGame }
 
   if (sections.settings) game = { ...game, ...importSettings(sections.settings) }
-  if (sections.nsfw) game.nsfwScenePrompt = sections.nsfw.nsfwScenePrompt ?? ''
+  if (sections.nsfw) {
+    game.nsfwEnabled = true
+    game.nsfwScenePrompt = sections.nsfw.nsfwScenePrompt ?? ''
+  }
   if (sections.characters) {
     const characters: CharacterProfile[] = []
     const portraitTotal = sections.characters.reduce((count, character) => count + (character.portraits?.length ?? 0), 0)
     let portraitCompleted = 0
+    options.onPortraitProgress?.(portraitCompleted, portraitTotal)
     for (const character of sections.characters) {
       const portraits: CharacterProfile['portraits'] = []
       for (const portrait of character.portraits ?? []) {

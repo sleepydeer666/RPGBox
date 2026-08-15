@@ -11,6 +11,12 @@ export interface ResponseCompletionState {
   missingStatusCharacterIds: string[]
 }
 
+export interface ContinuationMergeResult {
+  text: string
+  aligned: boolean
+  spliceOffset?: number
+}
+
 export function inspectLatestResponseCompletion(game: GameSession): ResponseCompletionState {
   const assistantIndex = game.messages.map((message) => message.role).lastIndexOf('assistant')
   const assistant = game.messages[assistantIndex]
@@ -47,11 +53,63 @@ export function inspectLatestResponseCompletion(game: GameSession): ResponseComp
   }
 }
 
-export function mergeContinuationResponse(original: string, continuation: string): string {
+export function mergeContinuationResponseResult(
+  original: string,
+  continuation: string,
+  options: { final?: boolean; spliceOffset?: number } = {},
+): ContinuationMergeResult {
   const base = original.replace(/\r\n?/g, '\n').trimEnd()
   const addition = continuation.replace(/\r\n?/g, '\n').trimStart()
-  if (!base) return addition
-  if (!addition) return base
+  if (!base) return { text: addition, aligned: true, spliceOffset: 0 }
+  if (!addition) return { text: base, aligned: false }
+
+  if (options.spliceOffset !== undefined) {
+    const spliceOffset = Math.min(Math.max(0, options.spliceOffset), base.length)
+    return { text: `${base.slice(0, spliceOffset)}${addition}`, aligned: true, spliceOffset }
+  }
+
+  const firstLineBreak = addition.indexOf('\n')
+  const firstLine = firstLineBreak >= 0
+    ? addition.slice(0, firstLineBreak)
+    : options.final
+      ? addition
+      : undefined
+  if (firstLine !== undefined) {
+    if (firstLine) {
+      const lines = linesWithOffsets(base)
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const oldLine = lines[index]
+        if (oldLine.text && firstLine.startsWith(oldLine.text)) {
+          return {
+            text: `${base.slice(0, oldLine.offset)}${addition}`,
+            aligned: true,
+            spliceOffset: oldLine.offset,
+          }
+        }
+      }
+    }
+  } else {
+    return { text: base, aligned: false }
+  }
+
+  return { text: mergeByCharacterOverlap(base, addition), aligned: false }
+}
+
+export function mergeContinuationResponse(original: string, continuation: string): string {
+  return mergeContinuationResponseResult(original, continuation, { final: true }).text
+}
+
+function linesWithOffsets(text: string): Array<{ text: string; offset: number }> {
+  const lines: Array<{ text: string; offset: number }> = []
+  let offset = 0
+  for (const line of text.split('\n')) {
+    lines.push({ text: line, offset })
+    offset += line.length + 1
+  }
+  return lines
+}
+
+function mergeByCharacterOverlap(base: string, addition: string): string {
 
   const maximum = Math.min(base.length, addition.length)
   let overlap = 0
