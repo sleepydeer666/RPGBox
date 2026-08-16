@@ -8,6 +8,16 @@ export const ROLE_PACKAGE_DIRECTORY_LABEL = '内部存储/Documents/RPGBox'
 
 export type RolePackageImportSource = File
 
+export async function inspectRolePackage(source: RolePackageImportSource): Promise<{ name: string }> {
+  const fileName = source.name
+  if (!/^[^/\\]+\.role\.rpgbox$/iu.test(fileName)) throw new Error('无效的角色包文件名')
+  const zip = await JSZip.loadAsync(await source.arrayBuffer())
+  const xmlFile = zip.file('role.xml')
+  if (!xmlFile) throw new Error('角色包缺少 role.xml')
+  const serialized = parseRoleXml(await xmlFile.async('string'))
+  return { name: serialized.name ?? '' }
+}
+
 interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number], 'uri'> {
   assetPath: string
 }

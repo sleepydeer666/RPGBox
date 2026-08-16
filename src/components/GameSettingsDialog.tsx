@@ -7,7 +7,7 @@ import type { CharacterPortrait, CharacterProfile, GameSession, PortraitGroup, P
 import { formatPortraitTags, parsePortraitTags } from '../lib/portraitTags'
 import { hexToHsv, hsvToHex, normalizeHexColor, type HsvColor } from '../lib/color'
 import PortraitCropDialog from './PortraitCropDialog'
-import { exportRolePackage, importRolePackage, ROLE_PACKAGE_DIRECTORY_LABEL } from '../lib/rolePackage'
+import { exportRolePackage, importRolePackage, inspectRolePackage, ROLE_PACKAGE_DIRECTORY_LABEL } from '../lib/rolePackage'
 
 interface Props {
   game: GameSession
@@ -21,6 +21,7 @@ interface Props {
 type Tab = 'ai' | 'game' | 'characters'
 
 type AddCharacterMode = 'new' | 'clone' | 'import'
+type RoleImportMode = 'new' | 'replace' | 'portraits'
 
 export default function GameSettingsDialog({ game, games, providers, fullSystemPrompt, onClose, onChange }: Props) {
   const [tab, setTab] = useState<Tab>('ai')
@@ -40,6 +41,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   const [exportNsfw, setExportNsfw] = useState(false)
   const [roleWorking, setRoleWorking] = useState(false)
   const [roleNotice, setRoleNotice] = useState('')
+  const [roleImportMode, setRoleImportMode] = useState<RoleImportMode | null>(null)
   const cloneGame = games.find((item) => item.id === cloneGameId) ?? game
   const cloneCandidates = cloneGame.characters.filter((character) => character.role === 'npc')
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
@@ -60,6 +62,15 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     setMemoryLimitDraft(String(game.memory.recentChapterLimit ?? 5))
     setPortraitTagDrafts({})
   }, [game.id])
+
+  useEffect(() => {
+    if (!roleImportMode) return
+    setRoleNotice({
+      new: '将创建全新角色',
+      replace: '将替换原有角色',
+      portraits: '将仅更新立绘',
+    }[roleImportMode])
+  }, [roleImportMode])
 
   function patchGame(patch: Partial<GameSession>) {
     onChange({ ...game, ...patch, updatedAt: Date.now() })
@@ -129,6 +140,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     setCloneGameId(game.id)
     setCloneCharacterId(game.characters.find((character) => character.role === 'npc')?.id ?? '')
     setPickedRoleFile(null)
+    setRoleImportMode(null)
     setRoleNotice('')
     setAddCharacterOpen(true)
   }
@@ -154,10 +166,48 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         setSelectedCharacterId(id)
       } else {
         if (!pickedRoleFile) throw new Error('请选择要导入的角色包')
-        const id = createNpcId()
+        const inspected = await inspectRolePackage(pickedRoleFile)
+        const existing = game.characters.find((character) => character.name === inspected.name)
+        if (existing && !roleImportMode) {
+          setRoleNotice('角色已存在，请选择处理方式：')
+          return
+        }
+        const mode = roleImportMode ?? 'new'
+        const id = mode === 'new' ? createNpcId() : existing?.id
+        if (!id) throw new Error('找不到要处理的同名角色')
         const imported = await importRolePackage(pickedRoleFile, game.id, id)
-        patchGame({ characters: [...game.characters, imported] })
-        setSelectedCharacterId(id)
+        if (mode === 'replace') {
+          await Promise.all((existing?.portraits ?? []).map((portrait) => deletePortraitFile(portrait.uri)))
+          patchGame({ characters: game.characters.map((character) => character.id === id ? { ...imported, id } : character) })
+          setSelectedCharacterId(id)
+        } else if (mode === 'portraits') {
+          if (!existing) throw new Error('更新立绘需要已有同名角色')
+          const oldByTags = new Map(existing.portraits.map((portrait) => [portraitTagsKey(portrait.tags?.length ? portrait.tags : [portrait.expression]), portrait]))
+          const usedIds = new Set(existing.portraits.map((portrait) => portrait.id))
+          const replacedIds = new Set<string>()
+          const replacements = imported.portraits.flatMap((portrait) => {
+            const old = oldByTags.get(portraitTagsKey(portrait.tags?.length ? portrait.tags : [portrait.expression]))
+            if (!old || replacedIds.has(old.id)) return []
+            replacedIds.add(old.id)
+            return [{ old, next: { ...portrait, id: old.id } }]
+          })
+          const additions = imported.portraits.filter((portrait) => !replacements.some(({ next }) => next.uri === portrait.uri)).map((portrait, index) => {
+            let id = portrait.id
+            if (usedIds.has(id)) id = `portrait-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`
+            usedIds.add(id)
+            return { ...portrait, id }
+          })
+          await Promise.all(replacements.map(({ old }) => deletePortraitFile(old.uri)))
+          const replacementMap = new Map(replacements.map(({ old, next }) => [old.id, next]))
+          const importedIdMap = new Map(imported.portraits.map((portrait) => [portrait.id, replacements.find(({ next }) => next.uri === portrait.uri)?.next.id ?? additions.find((item) => item.uri === portrait.uri)?.id ?? portrait.id]))
+          const importedDefaults = Object.fromEntries(Object.entries(imported.defaultPortraitIds ?? {}).map(([group, portraitId]) => [group, importedIdMap.get(portraitId ?? '')]).filter(([, portraitId]) => Boolean(portraitId)))
+          const portraits = [...existing.portraits.map((portrait) => replacementMap.get(portrait.id) ?? portrait), ...additions]
+          patchGame({ characters: game.characters.map((character) => character.id === id ? { ...character, portraits, defaultPortraitId: importedIdMap.get(imported.defaultPortraitId ?? '') ?? character.defaultPortraitId, defaultPortraitIds: { ...character.defaultPortraitIds, ...importedDefaults } } : character) })
+          setSelectedCharacterId(id)
+        } else {
+          patchGame({ characters: [...game.characters, imported] })
+          setSelectedCharacterId(id)
+        }
       }
       setAddCharacterOpen(false)
     } catch (error) {
@@ -327,7 +377,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
       </section>
       {promptPreviewOpen && <div className="prompt-preview-layer" role="dialog" aria-modal="true" aria-label="完整提示词"><button className="backdrop" onClick={() => setPromptPreviewOpen(false)} aria-label="关闭完整提示词" /><section className="modal prompt-preview-modal"><div className="modal-head"><div><span className="eyebrow">COMPILED SYSTEM PROMPT</span><h2>完整提示词</h2></div><button className="icon-button" onClick={() => setPromptPreviewOpen(false)} title="关闭"><X size={20} /></button></div><pre>{fullSystemPrompt}</pre></section></div>}
       {cropTarget && <PortraitCropDialog file={cropTarget.file} onCancel={() => setCropTarget(null)} onConfirm={(file) => addPortrait(cropTarget.characterId, file)} />}
-      {addCharacterOpen && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="添加NPC"><button className="backdrop" onClick={() => !roleWorking && setAddCharacterOpen(false)} aria-label="取消添加NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">ADD CHARACTER</span><h2>添加 NPC</h2></div><button className="icon-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><div className="role-mode-tabs"><button className={addCharacterMode === 'new' ? 'active' : ''} onClick={() => setAddCharacterMode('new')}>新建</button><button className={addCharacterMode === 'clone' ? 'active' : ''} onClick={() => setAddCharacterMode('clone')}>克隆</button><button className={addCharacterMode === 'import' ? 'active' : ''} onClick={() => setAddCharacterMode('import')}>导入</button></div>{addCharacterMode === 'new' && <p className="role-mode-description">建立一个空白 NPC，之后手工填写人物设定并添加立绘。</p>}{addCharacterMode === 'clone' && <><label>来源 RPG<select value={cloneGameId} onChange={(event) => { const nextGame = games.find((item) => item.id === event.target.value); setCloneGameId(event.target.value); setCloneCharacterId(nextGame?.characters.find((character) => character.role === 'npc')?.id ?? '') }}>{games.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>来源 NPC<select value={cloneCharacterId} onChange={(event) => setCloneCharacterId(event.target.value)}><option value="">请选择 NPC</option>{cloneCandidates.map((character) => <option value={character.id} key={character.id}>{character.name || '未命名NPC'}</option>)}</select></label><p className="role-mode-description">完整复制人物设定、状态栏、颜色、NSFW 信息和全部立绘，并生成独立的新 NPC。</p></>}{addCharacterMode === 'import' && <><div className="system-file-picker"><span>角色包</span><label className="secondary-button"><FileUp size={16} />{pickedRoleFile?.name ?? '选择文件'}<input type="file" accept=".role.rpgbox,.rpgbox,application/zip,application/octet-stream" hidden onChange={(event) => { setPickedRoleFile(event.target.files?.[0] ?? null); event.target.value = '' }} /></label>{pickedRoleFile && <button type="button" className="text-button" onClick={() => setPickedRoleFile(null)}>取消选择</button>}</div><p className="directory-note">可从 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>、下载目录或其他位置选择 `.role.rpgbox` 文件。</p></>}{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>导入或克隆后可继续编辑</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmAddCharacter()} disabled={roleWorking}>{roleWorking ? '处理中' : '确认添加'}</button></div></div></section></div>}
+      {addCharacterOpen && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="添加NPC"><button className="backdrop" onClick={() => !roleWorking && setAddCharacterOpen(false)} aria-label="取消添加NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">ADD CHARACTER</span><h2>添加 NPC</h2></div><button className="icon-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><div className="role-mode-tabs"><button className={addCharacterMode === 'new' ? 'active' : ''} onClick={() => setAddCharacterMode('new')}>新建</button><button className={addCharacterMode === 'clone' ? 'active' : ''} onClick={() => setAddCharacterMode('clone')}>克隆</button><button className={addCharacterMode === 'import' ? 'active' : ''} onClick={() => setAddCharacterMode('import')}>导入</button></div>{addCharacterMode === 'new' && <p className="role-mode-description">建立一个空白 NPC，之后手工填写人物设定并添加立绘。</p>}{addCharacterMode === 'clone' && <><label>来源 RPG<select value={cloneGameId} onChange={(event) => { const nextGame = games.find((item) => item.id === event.target.value); setCloneGameId(event.target.value); setCloneCharacterId(nextGame?.characters.find((character) => character.role === 'npc')?.id ?? '') }}>{games.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>来源 NPC<select value={cloneCharacterId} onChange={(event) => setCloneCharacterId(event.target.value)}><option value="">请选择 NPC</option>{cloneCandidates.map((character) => <option value={character.id} key={character.id}>{character.name || '未命名NPC'}</option>)}</select></label><p className="role-mode-description">完整复制人物设定、状态栏、颜色、NSFW 信息和全部立绘，并生成独立的新 NPC。</p></>}{addCharacterMode === 'import' && <><div className="system-file-picker"><span>角色包</span><label className="secondary-button"><FileUp size={16} />{pickedRoleFile?.name ?? '选择文件'}<input type="file" accept=".role.rpgbox,.rpgbox,application/zip,application/octet-stream" hidden onChange={(event) => { setPickedRoleFile(event.target.files?.[0] ?? null); setRoleImportMode(null); setRoleNotice(''); event.target.value = '' }} /></label>{pickedRoleFile && <button type="button" className="text-button" onClick={() => { setPickedRoleFile(null); setRoleImportMode(null); setRoleNotice('') }}>取消选择</button>}</div><p className="directory-note">可从 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>、下载目录或其他位置选择 `.role.rpgbox` 文件。</p>{roleImportMode === null && roleNotice === '角色已存在，请选择处理方式：' && <div className="role-import-options"><p>角色已存在，请选择处理方式：</p><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('new')} />新建角色</label><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('replace')} />替换原有角色</label><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('portraits')} />更新立绘</label></div>}</>}{roleNotice && roleImportMode !== null && <div className="role-import-selection">{roleNotice}</div>}</div><div className="modal-footer"><span>导入或克隆后可继续编辑</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmAddCharacter()} disabled={roleWorking}>{roleWorking ? '处理中' : '确认添加'}</button></div></div></section></div>}
       {exportCharacter && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="导出NPC"><button className="backdrop" onClick={() => !roleWorking && setExportCharacter(null)} aria-label="取消导出NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT CHARACTER</span><h2>导出“{exportCharacter.name || '未命名NPC'}”</h2></div><button className="icon-button" onClick={() => setExportCharacter(null)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><p className="role-mode-description">基础设定、状态栏、颜色、常规立绘及表情标签始终会导出。</p><label className="nsfw-mode-toggle"><input type="checkbox" checked={exportNsfw} onChange={(event) => setExportNsfw(event.target.checked)} /><span><strong><span className="nsfw-mark">❤</span> 包含 NSFW 信息</strong><small>导出 NSFW 设定、NSFW 分组与专用立绘；关闭时这些内容不会写入角色包。</small></span></label><p className="directory-note">文件将保存到 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>，扩展名为 `.role.rpgbox`。</p>{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>角色包不包含 RPG 剧情或 AI 配置</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportCharacter(null)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmExportCharacter()} disabled={roleWorking}>{roleWorking ? '导出中' : '确认导出'}</button></div></div></section></div>}
     </div>
   )
@@ -335,6 +385,10 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
 
 function toMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function portraitTagsKey(tags: string[]): string {
+  return Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))).sort().join('\u0001')
 }
 
 function ParameterSlider({ label, value, min, max, step, precision = 2, disabled = false, onChange }: { label: string; value: number; min: number; max: number; step: number; precision?: number; disabled?: boolean; onChange: (value: number) => void }) {

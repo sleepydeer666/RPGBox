@@ -2575,6 +2575,36 @@ textarea:focus-visible {
   line-height: 1.65;
 }
 
+.role-import-options {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.role-import-options p {
+  margin: 0 0 2px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.role-import-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.role-import-selection {
+  padding: 10px 12px;
+  border-left: 3px solid var(--gold);
+  background: rgba(211, 171, 97, 0.1);
+  color: var(--text);
+  font-weight: 600;
+}
+
 .crop-layer {
   position: fixed;
   z-index: 230;
