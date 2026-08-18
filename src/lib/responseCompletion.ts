@@ -17,11 +17,19 @@ export interface ContinuationMergeResult {
   spliceOffset?: number
 }
 
+export function responseContinuationInstruction(completion: ResponseCompletionState): string {
+  const instructions = [
+    ...(!completion.choicesComplete ? ['按要求补全选项'] : []),
+    ...(!completion.statusesComplete ? ['按要求输出状态栏更新'] : []),
+  ]
+  return instructions.join('，并') || '继续输出完整'
+}
+
 export function inspectLatestResponseCompletion(game: GameSession): ResponseCompletionState {
   const assistantIndex = game.messages.map((message) => message.role).lastIndexOf('assistant')
   const assistant = game.messages[assistantIndex]
   const canContinue = assistantIndex > 0 && game.messages[assistantIndex - 1]?.role === 'user'
-  const parsed = parseAssistantResponse(assistant?.content ?? '', { characters: game.characters })
+  const parsed = parseAssistantResponse(assistant?.rawContent ?? assistant?.content ?? '', { characters: game.characters })
   const expectedChoiceCount = 4
   const choiceIds = new Set(parsed.choices.map((choice) => choice.id.toUpperCase()))
   const choicesComplete = Array.from({ length: expectedChoiceCount }, (_, index) => String.fromCharCode(65 + index))
@@ -37,9 +45,11 @@ export function inspectLatestResponseCompletion(game: GameSession): ResponseComp
     .filter((character) => character.role === 'npc' && presentIds.includes(character.id))
     .map((character) => character.id))
   const updatedIds = new Set(parsed.characterStatusUpdates.map((update) => update.characterId))
-  const missingStatusCharacterIds = [...presentNpcIds].filter((id) => !updatedIds.has(id))
-  const statusesComplete = missingStatusCharacterIds.length === 0
   const statusRulesEnabled = Boolean(game.statusRulesPrompt?.trim())
+  const missingStatusCharacterIds = statusRulesEnabled
+    ? [...presentNpcIds].filter((id) => !updatedIds.has(id))
+    : []
+  const statusesComplete = missingStatusCharacterIds.length === 0
   const complete = choicesComplete && (!statusRulesEnabled || statusesComplete)
 
   return {

@@ -44,6 +44,7 @@ describe('RPG NSFW setting migration', () => {
     expect(loaded.games?.[0].chapterTransitionRules).toBe('')
     expect(loaded.games?.[0].recommendedChapterTurnsEnabled).toBe(false)
     expect(loaded.games?.[0].recommendedChapterTurns).toBe(20)
+    expect(loaded.games?.[0].aiSettings.warnOnProtocolAnomaly).toBe(false)
   })
 
   it('preserves an explicitly disabled saved RPG', async () => {
@@ -54,6 +55,17 @@ describe('RPG NSFW setting migration', () => {
 
     const loaded = await loadState()
     expect(loaded.games?.[0].nsfwEnabled).toBe(false)
+  })
+
+  it('defaults the format warning to disabled for older saved RPGs', async () => {
+    const game = createBlankGame(1)
+    delete (game.aiSettings as Partial<typeof game.aiSettings>).warnOnProtocolAnomaly
+    preferenceMocks.get.mockResolvedValue({
+      value: JSON.stringify({ games: [game], activeGameId: game.id }),
+    })
+
+    const loaded = await loadState()
+    expect(loaded.games?.[0].aiSettings.warnOnProtocolAnomaly).toBe(false)
   })
 
   it('normalizes invalid and out-of-range new-story choice counts', async () => {

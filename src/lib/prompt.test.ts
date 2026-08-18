@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSystemPrompt, takeRecentConversationTurns } from './prompt'
+import { buildLlmSpecialInstructionText, buildSystemPrompt, normalizeAssistantMessageForContext, takeRecentConversationTurns } from './prompt'
 import type { ChatMessage } from '../types'
 
 describe('buildSystemPrompt', () => {
@@ -147,6 +147,66 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('模式允许随剧情切换')
     expect(prompt).toContain('[状态] 地点：地点名称')
     expect(prompt).toContain('状态必须从以下常规状态中选择：开心。')
+  })
+})
+
+describe('assistant context normalization', () => {
+  const characters = [{
+    id: 'npc-1',
+    role: 'npc' as const,
+    name: '莉亚',
+    gender: '女',
+    description: '',
+    color: '#ffffff',
+    portraits: [
+      { id: 'normal-default', expression: '平静', tags: ['平静', '认真'], uri: 'normal.png', groups: ['normal' as const] },
+      { id: 'nsfw-default', expression: '迷乱', tags: ['迷乱'], uri: 'nsfw.png', groups: ['nsfw' as const] },
+    ],
+    defaultPortraitIds: { normal: 'normal-default', nsfw: 'nsfw-default' },
+  }]
+
+  it('replaces an out-of-list dialogue state only in the API context copy', () => {
+    const original = '[状态] 模式：常规；地点：旅店\n莉亚（开心）：晚上好。\n莉亚（认真）：请小心。'
+    const normalized = normalizeAssistantMessageForContext(original, characters, 'nsfw')
+
+    expect(normalized).toContain('莉亚（平静）：晚上好。')
+    expect(normalized).toContain('莉亚（认真）：请小心。')
+    expect(original).toContain('莉亚（开心）：晚上好。')
+  })
+
+  it('uses the response mode and its configured default state', () => {
+    const normalized = normalizeAssistantMessageForContext(
+      '[状态] 模式：NSFW；地点：旅店\n莉亚（陶醉）：别停。',
+      characters,
+      'normal',
+    )
+
+    expect(normalized).toContain('莉亚（迷乱）：别停。')
+  })
+})
+
+describe('LLM special instructions', () => {
+  it('builds only the selected next-turn constraints and repeats configured state rules', () => {
+    const text = buildLlmSpecialInstructionText({
+      nsfwEnabled: false,
+      characters: [{
+        id: 'npc-1', role: 'npc', name: '莉亚', gender: '女', description: '', color: '#fff',
+        portraits: [{ id: 'p1', expression: '平静', tags: ['平静', '微笑'], uri: 'p1.png', groups: ['normal'] }],
+      }],
+    }, {
+      forceNsfw: false,
+      remindCharacterStates: true,
+      remindOutputProtocol: true,
+      increaseLength: true,
+      decreaseLength: false,
+    })
+
+    expect(text).not.toContain('直接进入NSFW模式')
+    expect(text).toContain('注意NPC的状态必须按以下规则设定')
+    expect(text).toContain('状态必须从以下常规状态中选择：平静、微笑。')
+    expect(text).toContain('再次仔细阅读##客户端输出协议，注意要严格遵守该协议！')
+    expect(text).toContain('篇幅加长到2倍')
+    expect(text).not.toContain('篇幅减少到一半')
   })
 })
 

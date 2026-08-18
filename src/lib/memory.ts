@@ -8,6 +8,8 @@ export function normalizeMemoryState(memory: Partial<MemoryState> | undefined): 
     recentChapters: memory?.recentChapters ?? [],
     recentChapterLimit: clampRecentChapterLimit(memory?.recentChapterLimit),
     historicalSummary: memory?.historicalSummary ?? '',
+    chapterSummaryInstructions: memory?.chapterSummaryInstructions ?? '',
+    distantSummaryInstructions: memory?.distantSummaryInstructions ?? '',
   }
 }
 

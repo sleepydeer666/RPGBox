@@ -5,6 +5,8 @@ export interface DebugExchange {
   rawResponse: string
   repairContent?: string
   memorySummaryContent?: string
+  inputTokens?: number
+  outputTokens?: number
 }
 
 export function latestDebugExchange(messages: ChatMessage[]): DebugExchange {
@@ -20,5 +22,7 @@ export function latestDebugExchange(messages: ChatMessage[]): DebugExchange {
     rawResponse: assistant?.rawContent ?? assistant?.content ?? '',
     repairContent: assistant?.repairContent,
     memorySummaryContent: assistant?.memorySummaryDebug,
+    inputTokens: assistant?.inputTokens,
+    outputTokens: assistant?.outputTokens,
   }
 }

@@ -81,6 +81,14 @@ function decodeXmlAttribute(value: string): string {
 
 export default defineConfig({
   plugins: [react(), bundledDefaultPrompt(), bundledRpgAssets()],
+  build: {
+    rollupOptions: {
+      input: {
+        app: resolve(process.cwd(), 'index.html'),
+        builder: resolve(process.cwd(), 'builder.html'),
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

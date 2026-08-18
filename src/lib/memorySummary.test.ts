@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './memorySummary'
+import { formatAdditionalMemorySummaryInstructions, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './memorySummary'
 
 describe('memory summary validation', () => {
   it('accepts concise Chinese memory summaries', () => {
@@ -21,5 +21,11 @@ describe('memory summary validation', () => {
 
     expect(normalized).toBe('本章摘要： 主角与温蒂共同完成一次重要行动，温蒂对主角的信赖明显加深，并约定今后继续并肩行动。')
     expect(isValidChapterSummary(normalized)).toBe(true)
+  })
+
+  it('adds non-empty user instructions without weakening the output protocol', () => {
+    expect(formatAdditionalMemorySummaryInstructions('  优先保留人物关系变化  ')).toContain('优先保留人物关系变化')
+    expect(formatAdditionalMemorySummaryInstructions('优先保留人物关系变化')).toContain('不能覆盖系统提示词')
+    expect(formatAdditionalMemorySummaryInstructions('   ')).toBe('')
   })
 })

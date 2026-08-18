@@ -1,17 +1,26 @@
 import type { CharacterProfile, ChatMessage, GameSession, PortraitGroup } from '../types'
 import { formatRecentChapterMemories } from './memory'
 
+export interface LlmSpecialInstructions {
+  forceNsfw: boolean
+  remindCharacterStates: boolean
+  remindOutputProtocol: boolean
+  increaseLength: boolean
+  decreaseLength: boolean
+}
+
+const CONTEXT_DIALOGUE_LINE_PATTERN = /^(\s*)([^（()：:\n]{1,30})[（(]([^）)\n]{1,30})[）)](\s*[：:].*)$/u
+const CONTEXT_STATUS_LINE_PATTERN = /^\s*\[状态\]\s*(.*?)\s*$/iu
+const CONTEXT_MODE_FIELD_PATTERN = /(?:^|[；;|｜])\s*模式\s*[：:]\s*(常规|NSFW)(?=\s*(?:[；;|｜]|$))/iu
+
 function buildRpgOutputProtocol(characters: CharacterProfile[], statusRulesEnabled: boolean, nsfwEnabled: boolean) {
-  const normalStates = collectPortraitStates(characters, 'normal')
-  const nsfwStates = nsfwEnabled ? collectPortraitStates(characters, 'nsfw') : []
   const stateLine = nsfwEnabled
     ? '“[状态] 模式：常规；地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续；在场人物：角色姓名列表”'
     : '“[状态] 地点：地点名称；时间：时间描述；章节：当前活动主题；场景：延续；在场人物：角色姓名列表”'
-  const expressionRules = nsfwEnabled
-    ? `   状态基于当前故事模式（“常规”或“NSFW”）选择。
-   常规模式状态包括：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。
-   NSFW 模式状态包括：${nsfwStates.length ? nsfwStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
-    : `   状态必须从以下常规状态中选择：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
+  const expressionRules = buildPortraitStateRules(characters, nsfwEnabled)
+    .split('\n')
+    .map((line) => `   ${line}`)
+    .join('\n')
   return `## 客户端输出协议（必须严格遵守）
 本协议优先于其他提示词中关于选项、分段和输出格式的要求。
 剧情内容只输出一次，不要输出 JSON、Markdown 代码块、XML 标签或 <game-data>。
@@ -29,6 +38,29 @@ ${expressionRules}
 用户扮演角色的台词也必须使用其标准姓名，不得使用“你”“我”“主角”代替姓名。
 一行只能承担一种类型。旁白中即使含有引号也必须保持为“[旁白]”行，但不得用旁白直接描述角色未说出口的内心活动；同一句中同时包含台词和动作时，必须拆成一行人物台词和一行旁白。
 每次回复先输出若干行剧情片段，最后输出明确、互有差异且可执行的后续选项。${statusRulesEnabled ? '选项之后只能输出角色状态行，全部状态行结束后不得再输出剧情或解释。' : '选项之后不得再输出剧情或解释。'}`
+}
+
+function buildPortraitStateRules(characters: CharacterProfile[], nsfwEnabled: boolean) {
+  const normalStates = collectPortraitStates(characters, 'normal')
+  const nsfwStates = nsfwEnabled ? collectPortraitStates(characters, 'nsfw') : []
+  return nsfwEnabled
+    ? `状态基于当前故事模式（“常规”或“NSFW”）选择。\n常规模式状态包括：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。\nNSFW 模式状态包括：${nsfwStates.length ? nsfwStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
+    : `状态必须从以下常规状态中选择：${normalStates.length ? normalStates.join('、') : '无固定状态，可使用一个简短中文状态'}。`
+}
+
+export function buildLlmSpecialInstructionText(
+  game: Pick<GameSession, 'characters' | 'nsfwEnabled'>,
+  instructions: LlmSpecialInstructions,
+) {
+  const parts: string[] = []
+  if (instructions.forceNsfw) parts.push('直接进入NSFW模式')
+  if (instructions.remindCharacterStates) {
+    parts.push(`注意NPC的状态必须按以下规则设定\n${buildPortraitStateRules(game.characters, game.nsfwEnabled)}`)
+  }
+  if (instructions.remindOutputProtocol) parts.push('再次仔细阅读##客户端输出协议，注意要严格遵守该协议！')
+  if (instructions.increaseLength) parts.push('篇幅加长到2倍')
+  if (instructions.decreaseLength) parts.push('篇幅减少到一半')
+  return parts.join('\n\n')
 }
 
 function buildRpgSystemRules(nsfwEnabled: boolean) {
@@ -143,6 +175,34 @@ function portraitStateOptions(character: CharacterProfile, group: PortraitGroup)
   const options = Array.from(new Set(orderedPortraits.flatMap((portrait) =>
     (portrait.tags?.length ? portrait.tags : [portrait.expression]).map((tag) => tag.trim()).filter(Boolean))))
   return { options }
+}
+
+/** Normalizes only the API copy of assistant history; persisted and debug text stays untouched. */
+export function normalizeAssistantMessageForContext(
+  content: string,
+  characters: CharacterProfile[],
+  fallbackMode: PortraitGroup,
+) {
+  let mode = fallbackMode
+  for (const line of content.split(/\n/)) {
+    const status = line.match(CONTEXT_STATUS_LINE_PATTERN)
+    const modeField = status?.[1].match(CONTEXT_MODE_FIELD_PATTERN)
+    if (modeField) {
+      mode = modeField[1].toLocaleUpperCase() === 'NSFW' ? 'nsfw' : 'normal'
+      break
+    }
+  }
+
+  return content.split(/\n/).map((line) => {
+    const match = line.match(CONTEXT_DIALOGUE_LINE_PATTERN)
+    if (!match) return line
+    const character = characters.find((item) => item.name === match[2].trim())
+    if (!character) return line
+    const { options } = portraitStateOptions(character, mode)
+    const suppliedState = match[3].trim()
+    if (!options.length || options.includes(suppliedState)) return line
+    return `${match[1]}${match[2]}（${options[0]}）${match[4]}`
+  }).join('\n')
 }
 
 export function toApiMessages(systemPrompt: string, messages: ChatMessage[]) {

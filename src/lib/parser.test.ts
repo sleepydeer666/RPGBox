@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeProtocolResponse, parseAssistantResponse, standardResponse, visibleStory } from './parser'
+import { hasProtocolAnomaly, normalizeProtocolResponse, parseAssistantResponse, standardResponse, visibleStory } from './parser'
 
 describe('parseAssistantResponse', () => {
   it('parses the prefixed narration, canonical player dialogue and prefixed choices', () => {
@@ -80,6 +80,28 @@ describe('parseAssistantResponse', () => {
     const raw = '[旁白] 夜幕降临。\n[未知角色]（正常）：晚上好。\n[居眠鹿]状态：服装：制服'
 
     expect(normalizeProtocolResponse(raw, context)).toBe(raw)
+  })
+
+  it('recovers a complete status line joined directly after an unformatted reasoning prefix', () => {
+    const raw = 'I should keep the scene concise.[状态] 模式：常规；地点：书房；时间：夜晚；章节：密谈；场景：切换；在场人物：维纳斯\n[旁白] 门被轻轻关上。\n[选项A] 继续交谈'
+    const normalized = '[状态] 模式：常规；地点：书房；时间：夜晚；章节：密谈；场景：切换；在场人物：维纳斯\n[旁白] 门被轻轻关上。\n[选项A] 继续交谈'
+
+    expect(normalizeProtocolResponse(raw)).toBe(normalized)
+    expect(standardResponse(raw)).toBe(normalized)
+    expect(hasProtocolAnomaly(raw)).toBe(false)
+    expect(parseAssistantResponse(raw).gameData?.statePatch).toEqual({
+      contentMode: 'normal',
+      location: '书房',
+      time: '夜晚',
+      presentCharacterIds: [],
+    })
+    expect(parseAssistantResponse(raw).chapterTitle).toBe('密谈')
+  })
+
+  it('does not recover an incomplete status-shaped phrase mentioned in prose', () => {
+    const raw = 'The response should begin with [状态] 地点：书房。'
+    expect(normalizeProtocolResponse(raw)).toBe(raw)
+    expect(standardResponse(raw)).toBe('')
   })
 
   it('forces generated expressions into the active portrait group enum', () => {
@@ -199,5 +221,45 @@ describe('parseAssistantResponse', () => {
 describe('visibleStory', () => {
   it('hides partial legacy machine data during streaming', () => {
     expect(visibleStory('正文\n<game-data>{"choices"')).toBe('正文')
+  })
+})
+
+describe('hasProtocolAnomaly', () => {
+  const context = {
+    characters: [{
+      id: 'venus', name: '维纳斯', role: 'npc' as const,
+      portraits: [{ id: 'calm', expression: '平静', tags: ['平静'], groups: ['normal' as const], uri: 'calm.png' }],
+    }],
+    contentMode: 'normal' as const,
+  }
+
+  it('accepts a response containing only protocol lines', () => {
+    const raw = '[状态] 地点：书房；时间：夜晚；章节：测试；场景：延续；在场人物：维纳斯\n[旁白] 夜色渐深。\n维纳斯（平静）：继续吧。\n[选项A] 继续交谈'
+    expect(hasProtocolAnomaly(raw, context)).toBe(false)
+  })
+
+  it('ignores ordinary and invisible-only blank lines', () => {
+    const raw = '\n\u200B\n[状态] 地点：书房；时间：夜晚；章节：测试；场景：延续；在场人物：维纳斯\n  \n[旁白] 夜色渐深。\n\uFEFF\n[选项A] 继续交谈\n'
+    expect(hasProtocolAnomaly(raw, context)).toBe(false)
+    expect(hasProtocolAnomaly('\n\u200B\n\uFEFF\n')).toBe(false)
+  })
+
+  it('does not treat missing or truncated output as a protocol anomaly', () => {
+    expect(hasProtocolAnomaly('[旁白] 缺少状态行。', context)).toBe(false)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[旁白] 正文。', context)).toBe(false)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[选项', context)).toBe(false)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n维纳斯（平', context)).toBe(false)
+  })
+
+  it('accepts dialogue states outside the configured portrait tags', () => {
+    expect(hasProtocolAnomaly('[状态] 模式：NSFW；地点：书房；时间：夜晚\n维纳斯（激动）：继续吧。', context)).toBe(false)
+  })
+
+  it('detects explicit non-protocol lines and unknown characters', () => {
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n这是额外说明。\n[旁白] 正文。', context)).toBe(true)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n这是额外说明。\n[选项', context)).toBe(true)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n未知角色（平静）：继续吧。', context)).toBe(true)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[说明] 这是额外说明。', context)).toBe(true)
+    expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[状态错误] 内容', context)).toBe(true)
   })
 })

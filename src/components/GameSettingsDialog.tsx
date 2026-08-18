@@ -334,6 +334,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <label>对话轮数<input type="number" min="1" max="100" step="1" value={contextTurnsDraft} onChange={(event) => setContextTurnsDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
               <label>主记忆章节数<input type="number" min="1" max="20" step="1" value={memoryLimitDraft} onChange={(event) => setMemoryLimitDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
             </div>
+            <div className="form-section"><h3>输出检查</h3><label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label></div>
           </section>}
 
           {tab === 'game' && <section className="game-tab-panel">
@@ -347,8 +348,8 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
 
           {tab === 'characters' && <section className="character-settings-layout">
             <aside className="character-list">
-              {game.characters.map((character) => <button className={character.id === selectedCharacter?.id ? 'active' : ''} key={character.id} onClick={() => setSelectedCharacterId(character.id)}><span className="character-color-dot" style={{ background: character.color }} /><span><strong>{character.name || '未命名'}</strong><small>{character.role === 'player' ? '主角' : 'NPC'}</small></span></button>)}
               <button className="add-character-button" onClick={openAddCharacter}><Plus size={15} />添加 NPC</button>
+              {game.characters.map((character) => <button className={character.id === selectedCharacter?.id ? 'active' : ''} key={character.id} onClick={() => setSelectedCharacterId(character.id)}><span className="character-color-dot" style={{ background: character.color }} /><span><strong>{character.name || '未命名'}</strong><small>{character.role === 'player' ? '主角' : 'NPC'}</small></span></button>)}
             </aside>
             {selectedCharacter && <div className="character-editor">
               <div className="character-editor-head"><div><span className="eyebrow">{selectedCharacter.role === 'player' ? 'PLAYER CHARACTER' : 'NON-PLAYER CHARACTER'}</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setExportNsfw(game.nsfwEnabled); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>

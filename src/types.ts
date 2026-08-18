@@ -8,6 +8,10 @@ export interface ChatMessage {
   rawContent?: string
   repairContent?: string
   memorySummaryDebug?: string
+  inputTokens?: number
+  outputTokens?: number
+  selectedChoiceIds?: string[]
+  customInput?: string
   chapterTitle?: string
   createdAt: number
 }
@@ -40,6 +44,7 @@ export interface GameAiSettings {
   frequencyPenalty: number
   maxTokens: number
   contextTurns: number
+  warnOnProtocolAnomaly: boolean
 }
 
 export interface CharacterPortrait {
@@ -80,6 +85,8 @@ export interface MemoryState {
   recentChapters?: ChapterMemory[]
   recentChapterLimit?: number
   historicalSummary: string
+  chapterSummaryInstructions?: string
+  distantSummaryInstructions?: string
   chapterSummary?: string
   turnsSinceUnitStart?: number
 }

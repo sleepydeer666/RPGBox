@@ -14,6 +14,7 @@ const CHARACTER_STATUS_LINE_PATTERN = /^\s*\[([^\]\n]{1,30})\]\s*状态\s*[：:]
 const CHAPTER_START_PATTERN = /^\s*\[篇章开始\]\s*(.+?)\s*$/u
 const CHAPTER_END_PATTERN = /^\s*\[(?:篇章|章节)结束\]\s*$/u
 const UNIT_START_PATTERN = /^\s*\[单元开始\]\s*(.+?)\s*$/u
+const VISUAL_BLANK_LINE_PATTERN = /^[\s\u200B\u200C\u200D\u2060\uFEFF]*$/u
 
 function normalizeChoices(value: unknown): Choice[] {
   if (!Array.isArray(value)) return []
@@ -86,6 +87,22 @@ function parseStatusLine(line: string): ParsedStatusLine | undefined {
   return parsed
 }
 
+function recoverStatusAfterUnformattedPrefix(story: string): string {
+  const statusOffset = story.indexOf('[状态]')
+  if (statusOffset <= 0) return story
+  const lineStart = story.lastIndexOf('\n', statusOffset - 1) + 1
+  if (!story.slice(lineStart, statusOffset).trim()) return story
+  const lineEnd = story.indexOf('\n', statusOffset)
+  const statusLine = story.slice(statusOffset, lineEnd < 0 ? story.length : lineEnd).trim()
+  const status = parseStatusLine(statusLine)
+  const completeStatus = status?.location
+    && status.time
+    && Object.hasOwn(status, 'chapter')
+    && status.scene
+    && Object.hasOwn(status, 'presentCharacters')
+  return completeStatus ? story.slice(statusOffset) : story
+}
+
 function findCharacter(context: ResponseParseContext, suppliedName: string) {
   const direct = context.characters?.find((item) => item.name === suppliedName || item.id === suppliedName)
   if (direct) return direct
@@ -109,10 +126,13 @@ function normalizeMalformedDialogueLine(line: string, context: ResponseParseCont
 }
 
 export function normalizeProtocolResponse(raw: string, context: ResponseParseContext = {}): string {
-  if (!context.characters?.length) return raw
   const gameData = raw.match(GAME_DATA_PATTERN)?.[0]
-  const story = raw.replace(GAME_DATA_PATTERN, '')
-  const normalized = story.split(/\n/).map((line) => normalizeMalformedDialogueLine(line, context)).join('\n')
+  const originalStory = raw.replace(GAME_DATA_PATTERN, '')
+  const story = recoverStatusAfterUnformattedPrefix(originalStory)
+  if (!context.characters?.length && story === originalStory) return raw
+  const normalized = context.characters?.length
+    ? story.split(/\n/).map((line) => normalizeMalformedDialogueLine(line, context)).join('\n')
+    : story
   return `${normalized}${gameData ? `\n${gameData}` : ''}`.trim()
 }
 
@@ -246,6 +266,45 @@ function deriveStatePatch(story: string, context: ResponseParseContext): Record<
 export function visibleStory(raw: string): string {
   const marker = raw.search(/<game-data>/i)
   return (marker >= 0 ? raw.slice(0, marker) : raw).trim()
+}
+
+export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = {}): boolean {
+  if (VISUAL_BLANK_LINE_PATTERN.test(raw)) return false
+  if (GAME_DATA_PATTERN.test(raw)) return true
+  const normalized = normalizeProtocolResponse(raw, context)
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter((line) => !VISUAL_BLANK_LINE_PATTERN.test(line))
+
+  return lines.some((line, index) => {
+    if (parseStatusLine(line)) return false
+    if (CHAPTER_END_PATTERN.test(line) || NARRATION_LINE_PATTERN.test(line) || CHOICE_LINE_SINGLE_PATTERN.test(line)) return false
+    const characterStatus = line.match(CHARACTER_STATUS_LINE_PATTERN)
+    if (characterStatus) return Boolean(context.characters?.length) && !findCharacter(context, characterStatus[1].trim())
+    if (PLAYER_DIALOGUE_LINE_PATTERN.test(line)) return true
+    const dialogue = line.match(DIALOGUE_LINE_PATTERN)
+    if (!dialogue) return index !== lines.length - 1 || !isPlausiblyTruncatedProtocolLine(line, context)
+    if (!context.characters?.length) return false
+    return !context.characters.some((item) => item.name === dialogue[1].trim())
+  })
+}
+
+function isPlausiblyTruncatedProtocolLine(line: string, context: ResponseParseContext): boolean {
+  if (!line) return false
+  const bracketed = line.match(/^\[([^\]\n]*)/u)
+  if (bracketed) {
+    const suppliedTag = bracketed[1]
+    const protocolTags = ['状态', '旁白', '选项', '篇章开始', '篇章结束', '章节结束', '单元开始']
+    const bracketClosed = line.includes(']')
+    if (!bracketClosed && protocolTags.some((tag) => tag.startsWith(suppliedTag))) return true
+    if (bracketClosed && (protocolTags.includes(suppliedTag) || /^选项\s*[A-Z]$/u.test(suppliedTag))) return true
+    if (context.characters?.some((character) => {
+      const prefix = `[${character.name.trim()}]状态`
+      return prefix.startsWith(line) || line.startsWith(prefix)
+    })) return true
+  }
+  return Boolean(context.characters?.some((character) => {
+    const name = character.name.trim()
+    return name && (line === name || line.startsWith(`${name}（`) || line.startsWith(`${name}(`))
+  }))
 }
 
 export function standardResponse(raw: string, context: ResponseParseContext = {}): string {

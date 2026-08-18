@@ -7,6 +7,19 @@ describe('chapter memory model', () => {
     expect(memory.currentChapterSummary).toBe('旧的当前记忆')
     expect(memory.recentChapters).toEqual([])
     expect(memory.recentChapterLimit).toBe(5)
+    expect(memory.chapterSummaryInstructions).toBe('')
+    expect(memory.distantSummaryInstructions).toBe('')
+  })
+
+  it('preserves separate chapter and distant summary instructions', () => {
+    const memory = normalizeMemoryState({
+      historicalSummary: '',
+      chapterSummaryInstructions: '关注关系变化',
+      distantSummaryInstructions: '保留长期承诺',
+    })
+
+    expect(memory.chapterSummaryInstructions).toBe('关注关系变化')
+    expect(memory.distantSummaryInstructions).toBe('保留长期承诺')
   })
 
   it('formats completed and current chapter memories for the system prompt', () => {

@@ -6,6 +6,12 @@ export interface CompletionRequest {
   signal?: AbortSignal
   onToken?: (fullText: string) => void
   onFinishReason?: (reason: string) => void
+  onUsage?: (usage: CompletionUsage) => void
+}
+
+export interface CompletionUsage {
+  inputTokens: number
+  outputTokens: number
 }
 
 export function normalizeBaseUrl(baseUrl: string): string {
@@ -96,12 +102,24 @@ function extractFinishReason(payload: unknown): string | undefined {
   return typeof reason === 'string' && reason.trim() ? reason.trim() : undefined
 }
 
+function extractUsage(payload: unknown): CompletionUsage | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const usage = (payload as Record<string, unknown>).usage
+  if (!usage || typeof usage !== 'object') return undefined
+  const record = usage as Record<string, unknown>
+  const inputTokens = Number(record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens)
+  const outputTokens = Number(record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens)
+  if (!Number.isFinite(inputTokens) || !Number.isFinite(outputTokens)) return undefined
+  return { inputTokens, outputTokens }
+}
+
 export async function streamCompletion({
   provider,
   messages,
   signal,
   onToken,
   onFinishReason,
+  onUsage,
 }: CompletionRequest): Promise<string> {
   if (!provider.apiKey.trim()) throw new Error('请先在 API 设置中填写密钥')
   if (!provider.baseUrl.trim() || !provider.model.trim()) throw new Error('Base URL 和模型名不能为空')
@@ -121,6 +139,7 @@ export async function streamCompletion({
       frequency_penalty: provider.frequencyPenalty,
       max_tokens: provider.maxTokens,
       stream: true,
+      stream_options: { include_usage: true },
     }),
     signal,
   })
@@ -140,7 +159,9 @@ export async function streamCompletion({
     const payload = await response.json()
     const text = extractDelta(payload)
     const finishReason = extractFinishReason(payload)
+    const usage = extractUsage(payload)
     if (finishReason) onFinishReason?.(finishReason)
+    if (usage) onUsage?.(usage)
     onToken?.(text)
     return text
   }
@@ -149,27 +170,30 @@ export async function streamCompletion({
   const decoder = new TextDecoder()
   let buffer = ''
   let fullText = ''
+  let finishSeen = false
 
   while (true) {
-    const { done, value } = await reader.read()
+    const readResult = finishSeen ? await readAfterFinish(reader) : await reader.read()
+    if ('timedOut' in readResult) {
+      await reader.cancel()
+      return fullText
+    }
+    const { done, value } = readResult
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split(/\r?\n/)
     buffer = lines.pop() ?? ''
 
-    let finished = false
     for (const line of lines) {
       const event = consumeEventLine(line, fullText, onToken)
       fullText = event.text
       if (event.finishReason) onFinishReason?.(event.finishReason)
-      if (event.finished) {
-        finished = true
-        break
+      if (event.usage) onUsage?.(event.usage)
+      if (event.finishReason) finishSeen = true
+      if (event.done) {
+        await reader.cancel()
+        return fullText
       }
-    }
-    if (finished) {
-      await reader.cancel()
-      return fullText
     }
   }
 
@@ -177,23 +201,34 @@ export async function streamCompletion({
     const event = consumeEventLine(buffer, fullText, onToken)
     fullText = event.text
     if (event.finishReason) onFinishReason?.(event.finishReason)
+    if (event.usage) onUsage?.(event.usage)
   }
 
   return fullText
 }
 
+async function readAfterFinish(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<{ timedOut: true }>((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), 500)
+  })
+  const result = await Promise.race([reader.read(), timeout])
+  if (timer) clearTimeout(timer)
+  return result
+}
+
 function consumeEventLine(line: string, current: string, onToken?: (fullText: string) => void) {
   const data = line.trim().replace(/^data:\s*/, '')
-  if (!data) return { text: current, finished: false, finishReason: undefined }
-  if (data === '[DONE]') return { text: current, finished: true, finishReason: undefined }
+  if (!data) return { text: current, done: false, finishReason: undefined, usage: undefined }
+  if (data === '[DONE]') return { text: current, done: true, finishReason: undefined, usage: undefined }
   try {
     const payload = JSON.parse(data)
     const next = current + extractDelta(payload)
     onToken?.(next)
     const finishReason = extractFinishReason(payload)
-    return { text: next, finished: Boolean(finishReason), finishReason }
+    return { text: next, done: false, finishReason, usage: extractUsage(payload) }
   } catch {
     // Providers may insert keepalive comments between SSE events.
-    return { text: current, finished: false, finishReason: undefined }
+    return { text: current, done: false, finishReason: undefined, usage: undefined }
   }
 }

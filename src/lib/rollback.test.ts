@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialGame } from '../game'
 import type { RollbackSnapshot } from '../types'
-import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback } from './rollback'
+import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback, rollbackInputDraft } from './rollback'
 
 describe('RPG turn rollback', () => {
   it('restores messages, state and memory from the previous turn', () => {
@@ -60,5 +60,32 @@ describe('RPG turn rollback', () => {
     ])
 
     expect([...changed]).toEqual(['a'])
+  })
+
+  it('restores the selected choices and manual input from the rolled back turn', () => {
+    const game = createInitialGame()
+    const snapshot = createRollbackSnapshot(game, 'rollback-input', 1)
+    const after = {
+      ...game,
+      messages: [...game.messages, {
+        id: 'user-input', role: 'user' as const, content: 'AC，但是先观察四周',
+        selectedChoiceIds: ['A', 'C'], customInput: '先观察四周', createdAt: 2,
+      }],
+      rollbackLog: [snapshot],
+    }
+
+    expect(rollbackInputDraft(after)).toEqual({ selectedChoiceIds: ['A', 'C'], customInput: '先观察四周' })
+  })
+
+  it('infers a simple choice and manual input from legacy history', () => {
+    const game = createInitialGame()
+    const snapshot = createRollbackSnapshot(game, 'rollback-legacy', 1)
+    const after = {
+      ...game,
+      messages: [...game.messages, { id: 'legacy-user', role: 'user' as const, content: 'AB，但是保持警惕', createdAt: 2 }],
+      rollbackLog: [snapshot],
+    }
+
+    expect(rollbackInputDraft(after)).toEqual({ selectedChoiceIds: ['A', 'B'], customInput: '保持警惕' })
   })
 })

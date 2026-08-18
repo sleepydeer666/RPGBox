@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createBlankGame } from '../game'
-import { inspectLatestResponseCompletion, mergeContinuationResponse, mergeContinuationResponseResult } from './responseCompletion'
+import { inspectLatestResponseCompletion, mergeContinuationResponse, mergeContinuationResponseResult, responseContinuationInstruction } from './responseCompletion'
 
 function gameWithResponse(content: string, statusRulesPrompt = '') {
   const game = createBlankGame(1)
@@ -60,6 +60,32 @@ describe('inspectLatestResponseCompletion', () => {
   it('does not offer continuation for an assistant message without a preceding user turn', () => {
     const game = createBlankGame(1)
     expect(inspectLatestResponseCompletion(game).canContinue).toBe(false)
+  })
+
+  it('builds a targeted continuation instruction for the missing sections', () => {
+    const choicesMissing = inspectLatestResponseCompletion(gameWithResponse('[旁白] 正文。'))
+    expect(responseContinuationInstruction(choicesMissing)).toBe('按要求补全选项')
+
+    const statusesMissing = inspectLatestResponseCompletion(gameWithResponse(
+      '[状态] 地点：大厅；时间：早晨；章节：序章；场景：延续；在场人物：维纳斯\n[旁白] 正文。\n[选项A] 一\n[选项B] 二\n[选项C] 三\n[选项D] 四',
+      '记录情绪',
+    ))
+    expect(responseContinuationInstruction(statusesMissing)).toBe('按要求输出状态栏更新')
+
+    const bothMissing = inspectLatestResponseCompletion(gameWithResponse(
+      '[状态] 地点：大厅；时间：早晨；章节：序章；场景：延续；在场人物：维纳斯\n[旁白] 正文。',
+      '记录情绪',
+    ))
+    expect(responseContinuationInstruction(bothMissing)).toBe('按要求补全选项，并按要求输出状态栏更新')
+  })
+
+  it('does not request status updates when status rules are disabled', () => {
+    const game = gameWithResponse('[旁白] 正文。')
+    game.gameState.presentCharacterIds = ['venus']
+
+    const completion = inspectLatestResponseCompletion(game)
+    expect(completion.statusesComplete).toBe(true)
+    expect(responseContinuationInstruction(completion)).toBe('按要求补全选项')
   })
 })
 

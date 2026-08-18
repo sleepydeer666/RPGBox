@@ -61,6 +61,7 @@ describe('streamCompletion', () => {
       frequency_penalty: 0,
       max_tokens: 100,
       stream: true,
+      stream_options: { include_usage: true },
     })
   })
 
@@ -106,5 +107,28 @@ describe('streamCompletion', () => {
 
     expect(result).toBe('未完成')
     expect(finishReasons).toEqual(['length'])
+  })
+
+  it('reports token usage sent after the finish reason', async () => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"完成"},"finish_reason":"stop"}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":123,"completion_tokens":45}}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+    const usages: Array<{ inputTokens: number; outputTokens: number }> = []
+
+    const result = await streamCompletion({
+      provider: { id: 'test', name: 'test', baseUrl: 'https://example.com/v1', apiKey: 'key', model: 'model', models: ['model'], temperature: 1, topP: 1, presencePenalty: 0, frequencyPenalty: 0, maxTokens: 100 },
+      messages: [],
+      onUsage: (usage) => usages.push(usage),
+    })
+
+    expect(result).toBe('完成')
+    expect(usages).toEqual([{ inputTokens: 123, outputTokens: 45 }])
   })
 })

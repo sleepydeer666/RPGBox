@@ -6,7 +6,7 @@ describe('latestDebugExchange', () => {
   it('pairs the latest assistant response with the processed client request', () => {
     const messages: ChatMessage[] = [
       { id: 'u1', role: 'user', content: '选择A', requestContent: '选择A\n\n输出4个后续选项', createdAt: 1 },
-      { id: 'a1', role: 'assistant', content: '[旁白] 过滤后的内容', rawContent: '模型思考\n[旁白] 原始内容', memorySummaryDebug: '===== 第 1 次 LLM 返回 =====\n本章摘要：测试', createdAt: 2 },
+      { id: 'a1', role: 'assistant', content: '[旁白] 过滤后的内容', rawContent: '模型思考\n[旁白] 原始内容', memorySummaryDebug: '===== 第 1 次 LLM 返回 =====\n本章摘要：测试', inputTokens: 321, outputTokens: 123, createdAt: 2 },
     ]
 
     expect(latestDebugExchange(messages)).toEqual({
@@ -14,6 +14,8 @@ describe('latestDebugExchange', () => {
       rawResponse: '模型思考\n[旁白] 原始内容',
       repairContent: undefined,
       memorySummaryContent: '===== 第 1 次 LLM 返回 =====\n本章摘要：测试',
+      inputTokens: 321,
+      outputTokens: 123,
     })
   })
 

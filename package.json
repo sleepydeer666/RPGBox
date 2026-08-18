@@ -1,11 +1,12 @@
 {
   "name": "rpgbox",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "build:builder:offline": "tsc -p tsconfig.app.json --noEmit && vite build --config vite.builder.config.ts && node tools/build-offline-builder.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "android:sync": "pnpm build && cap sync android",

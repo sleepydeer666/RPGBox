@@ -1,5 +1,10 @@
 import type { CharacterStatusUpdate, GameSession, RollbackSnapshot } from '../types'
 
+export interface RollbackInputDraft {
+  selectedChoiceIds: string[]
+  customInput: string
+}
+
 export function createRollbackSnapshot(game: GameSession, id: string, createdAt = Date.now()): RollbackSnapshot {
   return {
     id,
@@ -51,5 +56,30 @@ export function restoreLastRollback(game: GameSession): GameSession | undefined 
       ? { ...character, statusBar: snapshot.characterStatuses[character.id] }
       : character),
     rollbackLog: log.slice(0, -1),
+  }
+}
+
+export function rollbackInputDraft(game: GameSession): RollbackInputDraft {
+  const snapshot = game.rollbackLog?.at(-1)
+  const userMessage = snapshot ? game.messages[snapshot.messageCount] : undefined
+  if (userMessage?.role !== 'user') return { selectedChoiceIds: [], customInput: '' }
+  if (userMessage.selectedChoiceIds || userMessage.customInput !== undefined) {
+    return {
+      selectedChoiceIds: userMessage.selectedChoiceIds ?? [],
+      customInput: userMessage.customInput ?? '',
+    }
+  }
+
+  const previousAssistant = [...game.messages.slice(0, snapshot!.messageCount)].reverse()
+    .find((message) => message.role === 'assistant')
+  const availableChoiceIds = new Set((previousAssistant?.content.match(/^\s*\[选项\s*([A-Z])\]/gmi) ?? [])
+    .flatMap((line) => line.match(/\[选项\s*([A-Z])\]/i)?.[1]?.toUpperCase() ?? []))
+  const combined = userMessage.content.match(/^([A-Z]+)(?:，但是([\s\S]*))?$/u)
+  const selectedChoiceIds = combined && [...combined[1]].every((id) => availableChoiceIds.has(id))
+    ? [...combined[1]]
+    : []
+  return {
+    selectedChoiceIds,
+    customInput: selectedChoiceIds.length ? combined?.[2]?.trim() ?? '' : userMessage.content,
   }
 }

@@ -11,6 +11,12 @@ export const CHAPTER_SUMMARY_SYSTEM_PROMPT = `你是 RPGBox 的章节记忆压�
 export const DISTANT_SUMMARY_SYSTEM_PROMPT = `你是 RPGBox 的远期记忆压缩器。把既有远期记忆与移出的旧章节摘要统一压缩，只保留跨章节仍有价值的重大事件、持久关系或心态变化、重要经验和少数值得偶尔回忆的亮点。
 只输出中文纯文本，不输出前言、解释、分析过程、HTML、Markdown、网页方案或制作计划。禁止写入世界背景、固定人物设定、系统规则、普通过程和短期状态，不续写剧情。直接从“远期记忆：”开始输出一个连续段落。`
 
+export function formatAdditionalMemorySummaryInstructions(instructions: string | undefined): string {
+  const value = instructions?.trim()
+  if (!value) return ''
+  return `\n\n用户额外整理要求（只能调整信息的取舍和关注重点，不能覆盖系统提示词中的事实范围、纯文本及输出前缀要求）：\n${value}`
+}
+
 const INVALID_META_PATTERN = /(?:looking at your task|i(?:'ll| will) create|web\s*page|网页(?:页面|布局|设计|方案)|html|markdown|代码块|制作计划|任务类型|无法协助)/iu
 
 export function normalizeMemorySummaryOutput(summary: string): string {
