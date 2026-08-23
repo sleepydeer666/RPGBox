@@ -39,7 +39,15 @@ describe('chapter memory model', () => {
       recentChapters: [{ id: 'failed', title: '未完成总结的章节', summary: '', completedAt: 1 }],
     }))
 
-    expect(text).toBe('暂无主记忆。')
+    expect(text).toBe('')
+  })
+
+  it('normalizes memory feature switches and character experiences', () => {
+    const memory = normalizeMemoryState({ characterExperiences: { vera: '曾与主角共同脱险。' } })
+    expect(memory.chapterMemoryEnabled).toBe(true)
+    expect(memory.distantMemoryEnabled).toBe(true)
+    expect(memory.characterExperienceEnabled).toBe(true)
+    expect(memory.characterExperiences).toEqual({ vera: '曾与主角共同脱险。' })
   })
 
   it('clamps the configurable recent chapter count', () => {

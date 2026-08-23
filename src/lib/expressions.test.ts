@@ -25,6 +25,16 @@ describe('resolveCharacterExpression', () => {
     expect(result.displayExpression).toBe('平静')
   })
 
+  it('uses the default portrait without inventing a display state for an untagged line', () => {
+    const result = resolveCharacterExpression(character({
+      defaultPortraitId: 'default',
+      portraits: [{ id: 'default', expression: '平静', uri: 'neutral.png' }],
+    }), '')
+    expect(result.portrait?.id).toBe('default')
+    expect(result.displayExpression).toBe('')
+    expect(resolveCharacterExpression(character(), '').displayExpression).toBe('')
+  })
+
   it('matches multiple tags only inside the active portrait group', () => {
     const result = resolveCharacterExpression(character({
       defaultPortraitIds: { normal: 'normal', nsfw: 'nsfw' },
@@ -52,5 +62,25 @@ describe('resolveCharacterExpression', () => {
     }), '未知、担忧、开心', 'normal')
     expect(result.portrait?.id).toBe('worried')
     expect(result.displayExpression).toBe('担忧')
+  })
+
+  it('does not display a portrait for an invalid tag when the active group has no default', () => {
+    const profile = character({
+      portraits: [
+        { id: 'happy', expression: '开心', tags: ['开心'], groups: ['normal'], uri: 'happy.png' },
+        { id: 'nsfw', expression: '迷乱', tags: ['迷乱'], groups: ['nsfw'], uri: 'nsfw.png' },
+      ],
+    })
+    expect(resolveCharacterExpression(profile, '惊讶', 'normal').portrait).toBeUndefined()
+    expect(resolveCharacterExpression(profile, '开心', 'normal').portrait?.id).toBe('happy')
+    expect(resolveCharacterExpression(profile, '迷乱', 'normal').portrait).toBeUndefined()
+  })
+
+  it('keeps portraits with an explicit empty mode list inactive', () => {
+    const profile = character({
+      defaultPortraitIds: { normal: 'unused' },
+      portraits: [{ id: 'unused', expression: '备用', tags: ['备用'], groups: [], uri: 'unused.png' }],
+    })
+    expect(resolveCharacterExpression(profile, '备用', 'normal').portrait).toBeUndefined()
   })
 })

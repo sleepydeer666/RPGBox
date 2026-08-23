@@ -1,8 +1,10 @@
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
+import { isAndroidRuntime } from '../platform/runtime'
 
 export async function savePortraitFile(gameId: string, characterId: string, file: File): Promise<string> {
   const dataUrl = await readAsDataUrl(file)
+  if (!isAndroidRuntime()) return dataUrl
   const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
   const extension = file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png'
   const path = `portraits/${safePart(gameId)}/${safePart(characterId)}/${Date.now()}-${Math.random().toString(16).slice(2)}.${extension}`
@@ -11,6 +13,7 @@ export async function savePortraitFile(gameId: string, characterId: string, file
 }
 
 export async function deletePortraitFile(uri: string): Promise<void> {
+  if (!isAndroidRuntime() || uri.startsWith('data:') || uri.startsWith('blob:')) return
   try {
     await Filesystem.deleteFile({ path: uri })
   } catch {
@@ -19,6 +22,8 @@ export async function deletePortraitFile(uri: string): Promise<void> {
 }
 
 export async function readPortraitBase64(uri: string): Promise<string> {
+  if (uri.startsWith('data:')) return uri.slice(uri.indexOf(',') + 1)
+  if (uri.startsWith('blob:')) return blobToBase64(await fetch(uri).then((response) => response.blob()))
   const result = await Filesystem.readFile({ path: uri })
   if (typeof result.data === 'string') return result.data
   return blobToBase64(result.data)
@@ -26,6 +31,7 @@ export async function readPortraitBase64(uri: string): Promise<string> {
 
 export async function savePortraitBase64(gameId: string, characterId: string, data: string, extension = 'png'): Promise<string> {
   const safeExtension = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png'
+  if (!isAndroidRuntime()) return `data:${mimeType(safeExtension)};base64,${data}`
   const path = `portraits/${safePart(gameId)}/${safePart(characterId)}/${Date.now()}-${Math.random().toString(16).slice(2)}.${safeExtension}`
   const result = await Filesystem.writeFile({ path, data, directory: Directory.Data, recursive: true })
   return result.uri
@@ -65,4 +71,11 @@ function fileExtension(path: string): string {
 
 function safePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function mimeType(extension: string): string {
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'webp') return 'image/webp'
+  if (extension === 'gif') return 'image/gif'
+  return 'image/png'
 }

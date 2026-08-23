@@ -20,7 +20,6 @@ const newId = () => `provider-${Date.now()}-${Math.random().toString(16).slice(2
 export default function GlobalSettingsDialog(props: Props) {
   const active = props.providers.find((provider) => provider.id === props.activeProviderId) ?? props.providers[0]
   const [remoteModels, setRemoteModels] = useState<string[] | null>(null)
-  const [selectedRemoteModels, setSelectedRemoteModels] = useState<string[]>([])
   const [modelSearch, setModelSearch] = useState('')
   const [manualModel, setManualModel] = useState('')
   const [modelLoading, setModelLoading] = useState(false)
@@ -29,10 +28,10 @@ export default function GlobalSettingsDialog(props: Props) {
   const [defaultPromptError, setDefaultPromptError] = useState('')
   const activeModels = active.models?.length ? active.models : active.model ? [active.model] : []
   const filteredRemoteModels = (remoteModels ?? []).filter((model) => model.toLocaleLowerCase().includes(modelSearch.trim().toLocaleLowerCase()))
+  const allFilteredModelsAdded = filteredRemoteModels.length > 0 && filteredRemoteModels.every((model) => activeModels.includes(model))
 
   useEffect(() => {
     setRemoteModels(null)
-    setSelectedRemoteModels([])
     setModelSearch('')
     setManualModel('')
     setModelError('')
@@ -60,7 +59,6 @@ export default function GlobalSettingsDialog(props: Props) {
     setModelError('')
     try {
       setRemoteModels(await fetchAvailableModels(active))
-      setSelectedRemoteModels([])
     } catch (error) {
       setModelError(error instanceof Error ? error.message : '获取模型失败')
       setRemoteModels(null)
@@ -74,12 +72,26 @@ export default function GlobalSettingsDialog(props: Props) {
     if (!additions.length) return
     const nextModels = Array.from(new Set([...activeModels, ...additions]))
     updateActive({ models: nextModels, model: active.model || nextModels[0] })
-    setSelectedRemoteModels([])
   }
 
   function removeModel(model: string) {
     const nextModels = activeModels.filter((item) => item !== model)
     updateActive({ models: nextModels, model: active.model === model ? (nextModels[0] ?? '') : active.model })
+  }
+
+  function toggleRemoteModel(model: string) {
+    if (activeModels.includes(model)) removeModel(model)
+    else addModels([model])
+  }
+
+  function toggleFilteredRemoteModels() {
+    if (allFilteredModelsAdded) {
+      const filtered = new Set(filteredRemoteModels)
+      const nextModels = activeModels.filter((model) => !filtered.has(model))
+      updateActive({ models: nextModels, model: filtered.has(active.model) ? (nextModels[0] ?? '') : active.model })
+    } else {
+      addModels(filteredRemoteModels)
+    }
   }
 
   async function useDefaultPrompt() {
@@ -125,7 +137,7 @@ export default function GlobalSettingsDialog(props: Props) {
               {activeModels.length > 0 ? <div className="added-model-list">{activeModels.map((model) => <div className={`added-model-row ${model === active.model ? 'active' : ''}`} key={model}><button className="model-select-button" onClick={() => updateActive({ model })}><span className="model-radio">{model === active.model && <Check size={13} />}</span><span>{model}</span></button><button className="model-remove-button" onClick={() => removeModel(model)} title={`删除 ${model}`}><X size={15} /></button></div>)}</div> : <p className="empty-models">尚未添加模型</p>}
               <div className="manual-model-row"><input value={manualModel} onChange={(event) => setManualModel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addModels([manualModel]); setManualModel('') } }} placeholder="手动输入模型 ID" autoCapitalize="none" /><button className="icon-button" onClick={() => { addModels([manualModel]); setManualModel('') }} disabled={!manualModel.trim()} title="添加模型"><Plus size={17} /></button></div>
               {modelError && <div className="inline-error">{modelError}</div>}
-              {remoteModels && <div className="remote-model-picker"><div className="model-picker-head"><div className="model-search"><Search size={15} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="搜索接口模型" /></div><button className="text-button" onClick={() => setSelectedRemoteModels(filteredRemoteModels.filter((model) => !activeModels.includes(model)))}>全选</button></div><div className="remote-model-list">{filteredRemoteModels.map((model) => { const added = activeModels.includes(model); return <label className={added ? 'remote-model-row added' : 'remote-model-row'} key={model}><input type="checkbox" checked={added || selectedRemoteModels.includes(model)} disabled={added} onChange={() => setSelectedRemoteModels((current) => current.includes(model) ? current.filter((item) => item !== model) : [...current, model])} /><span>{model}</span>{added && <small>已添加</small>}</label> })}</div><div className="model-picker-footer"><span>接口返回 {remoteModels.length} 个模型</span><button className="primary-button" onClick={() => addModels(selectedRemoteModels)} disabled={!selectedRemoteModels.length}>添加所选{selectedRemoteModels.length ? ` (${selectedRemoteModels.length})` : ''}</button></div></div>}
+              {remoteModels && <div className="remote-model-picker"><div className="model-picker-head"><div className="model-search"><Search size={15} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="搜索接口模型" /></div><button className="text-button" onClick={toggleFilteredRemoteModels} disabled={!filteredRemoteModels.length}>{allFilteredModelsAdded ? '取消全选' : '全选'}</button></div><div className="remote-model-list">{filteredRemoteModels.map((model) => { const added = activeModels.includes(model); return <label className={added ? 'remote-model-row added' : 'remote-model-row'} key={model}><input type="checkbox" checked={added} onChange={() => toggleRemoteModel(model)} /><span>{model}</span>{added && <small>已添加</small>}</label> })}</div><div className="model-picker-footer"><span>接口返回 {remoteModels.length} 个模型，勾选后立即添加</span></div></div>}
             </div>
           </div>
         </div>

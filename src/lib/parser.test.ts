@@ -12,18 +12,23 @@ describe('parseAssistantResponse', () => {
       { type: 'dialogue', characterId: 'player', characterName: '亚瑟', expression: '平静', text: '我们开始吧。' },
     ])
     expect(parsed.choices).toEqual([{ id: 'A', text: '翻开地图' }, { id: 'B', text: '询问维纳斯' }])
-    expect(parsed.gameData?.statePatch).toEqual({ contentMode: 'normal', location: '书房', time: '清晨' })
+    expect(parsed.gameData?.statePatch).toEqual({ location: '书房', time: '清晨' })
   })
 
   it('accepts partial status fields without inventing missing values', () => {
     const parsed = parseAssistantResponse('[状态] 地点：地下室；场景：切换\n[旁白] 石门缓缓开启。')
     expect(parsed.gameData?.statePatch).toEqual({ location: '地下室' })
-    expect(parsed.sceneChanged).toBe(true)
   })
 
   it('extracts a named or intentionally blank chapter from the status line', () => {
     expect(parseAssistantResponse('[状态] 模式：常规；地点：遗迹；时间：上午；章节：地下城第一层；场景：延续\n[旁白] 众人继续前进。').chapterTitle).toBe('地下城第一层')
     expect(parseAssistantResponse('[状态] 模式：常规；地点：山路；时间：傍晚；章节：；场景：切换\n[旁白] 众人在返程。').chapterTitle).toBe('')
+  })
+
+  it('extracts the one-time new chapter control line without displaying it', () => {
+    const parsed = parseAssistantResponse('[状态] 地点：遗迹；时间：上午；在场人物：无\n[新章节] 地下城第一层\n[旁白] 石门缓缓开启。')
+    expect(parsed.newChapterTitle).toBe('地下城第一层')
+    expect(parsed.segments).toEqual([{ type: 'narration', text: '石门缓缓开启。' }])
   })
 
   it('maps a player alias back to the configured player for malformed compatible output', () => {
@@ -40,6 +45,15 @@ describe('parseAssistantResponse', () => {
     expect(parsed.segments[1]).toEqual({
       type: 'dialogue', characterId: 'player', characterName: '亚瑟', expression: '', text: '“先不要开门。”',
     })
+  })
+
+  it('parses a known character dialogue line without a portrait label', () => {
+    const characters = [{ id: 'venus', name: '维纳斯', role: 'npc' as const, defaultPortraitId: 'default', portraits: [{ id: 'default', expression: '平静', tags: ['平静'], groups: ['normal' as const], uri: 'default.png' }] }]
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；在场人物：维纳斯\n维纳斯：我会留在这里。', { characters })
+    expect(parsed.segments[0]).toMatchObject({
+      type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '', text: '我会留在这里。',
+    })
+    expect(hasProtocolAnomaly('[状态] 地点：大厅；时间：夜晚；在场人物：维纳斯\n维纳斯：我会留在这里。', { characters })).toBe(false)
   })
 
   it('parses strict dialogue lines and maps configured character names', () => {
@@ -90,7 +104,6 @@ describe('parseAssistantResponse', () => {
     expect(standardResponse(raw)).toBe(normalized)
     expect(hasProtocolAnomaly(raw)).toBe(false)
     expect(parseAssistantResponse(raw).gameData?.statePatch).toEqual({
-      contentMode: 'normal',
       location: '书房',
       time: '夜晚',
       presentCharacterIds: [],
@@ -115,10 +128,53 @@ describe('parseAssistantResponse', () => {
     }]
 
     const normal = parseAssistantResponse('[状态] 模式：常规；地点：房间；时间：夜晚；章节：测试；场景：延续\n维纳斯（慌张）：等等。', { characters })
-    const nsfw = parseAssistantResponse('[状态] 模式：NSFW；地点：房间；时间：夜晚；章节：测试；场景：延续\n维纳斯（颤抖）：等等。', { characters })
+    const nsfw = parseAssistantResponse('[状态] 模式：常规；地点：房间；时间：夜晚；章节：测试；场景：延续\n维纳斯（颤抖）：等等。', { characters, contentMode: 'nsfw' })
 
     expect(normal.segments[0]).toMatchObject({ expression: '平静' })
     expect(nsfw.segments[0]).toMatchObject({ expression: '羞涩' })
+  })
+
+  it('applies a requested narrative mode only after its explicit switch marker', () => {
+    const characters = [{
+      id: 'venus', name: '维纳斯', role: 'npc' as const,
+      defaultPortraitIds: { battle: 'battle', work: 'work' },
+      portraits: [
+        { id: 'battle', expression: '警戒', tags: ['警戒'], groups: ['battle'], uri: 'battle.png' },
+        { id: 'work', expression: '微笑', tags: ['微笑'], groups: ['work'], uri: 'work.png' },
+      ],
+    }]
+    const context = {
+      characters,
+      initialContentMode: 'battle',
+      contentMode: 'work',
+      narrativeModes: [
+        { id: 'battle', name: '战斗服', color: '#f00' },
+        { id: 'work', name: '工作服', color: '#0f0' },
+      ],
+    }
+    const parsed = parseAssistantResponse(
+      '[状态] 地点：前线；时间：黄昏；在场人物：维纳斯\n维纳斯（警戒）：战斗结束了。\n[叙事模式切换] 工作服\n[旁白] 她换好制服回到基地。\n维纳斯（微笑）：开始整理报告吧。\n[选项A] 帮忙',
+      context,
+    )
+
+    expect(parsed.narrativeModeSwitchIndexes).toEqual([1])
+    expect(parsed.segments.map((segment) => segment.rpgStateId)).toEqual(['battle', 'work', 'work'])
+    expect(parsed.segments[0]).toMatchObject({ expression: '警戒' })
+    expect(parsed.segments[2]).toMatchObject({ expression: '微笑' })
+    expect(standardResponse('[旁白] 收尾。\n[叙事模式切换] 工作服\n[旁白] 新场景。', context)).toContain('[叙事模式切换] 工作服')
+  })
+
+  it('keeps the initial mode when the requested switch marker is missing or invalid', () => {
+    const context = {
+      initialContentMode: 'battle', contentMode: 'work',
+      narrativeModes: [{ id: 'battle', name: '战斗服', color: '#f00' }, { id: 'work', name: '工作服', color: '#0f0' }],
+    }
+    const missing = parseAssistantResponse('[旁白] 收尾。\n[旁白] 新场景。', context)
+    const invalid = parseAssistantResponse('[旁白] 收尾。\n[叙事模式切换] 睡衣\n[旁白] 新场景。', context)
+
+    expect(missing.segments.map((segment) => segment.rpgStateId)).toEqual(['battle', 'battle'])
+    expect(invalid.segments.map((segment) => segment.rpgStateId)).toEqual(['battle', 'battle'])
+    expect(invalid.narrativeModeSwitchIndexes).toEqual([])
   })
 
   it('never infers dialogue from quotation marks in prose', () => {
@@ -138,13 +194,12 @@ describe('parseAssistantResponse', () => {
     expect(standardResponse('我需要先分析用户意图。\n[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。\n这是一段格式说明。')).toBe('[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。')
   })
 
-  it('extracts scene state and removes scene and choice lines from story segments', () => {
+  it('keeps the legacy scene line readable without exposing it as a story segment', () => {
     const parsed = parseAssistantResponse('[旁白] 钟声响起。\n[场景] 地点：钟楼；时间：深夜\nA. 登上塔顶\nB. 留在原地')
 
     expect(parsed.segments).toEqual([{ type: 'narration', text: '钟声响起。' }])
     expect(parsed.choices).toEqual([{ id: 'A', text: '登上塔顶' }, { id: 'B', text: '留在原地' }])
     expect(parsed.gameData?.statePatch).toEqual({ location: '钟楼', time: '深夜' })
-    expect(parsed.sceneChanged).toBe(true)
   })
 
   it('keeps legacy game-data responses readable', () => {
@@ -179,13 +234,12 @@ describe('parseAssistantResponse', () => {
   it('parses the mandatory leading RPG state and hides it from the story', () => {
     const parsed = parseAssistantResponse('[状态] 模式：NSFW；地点：寝室；时间：深夜；场景：切换\n维纳斯（羞涩、担忧）：你确定吗？\nA. 回应她')
 
-    expect(parsed.gameData?.statePatch).toEqual({ contentMode: 'nsfw', location: '寝室', time: '深夜' })
-    expect(parsed.sceneChanged).toBe(true)
+    expect(parsed.gameData?.statePatch).toEqual({ location: '寝室', time: '深夜' })
     expect(parsed.segments[0]).toMatchObject({ type: 'dialogue', expression: '羞涩、担忧' })
   })
 
   it('maps the reported present characters from the RPG state to character IDs', () => {
-    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；章节：测试；场景：延续；在场人物：维纳斯、主角\n[旁白] 门在身后关上。', {
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；章节：测试；在场人物：维纳斯、主角\n[旁白] 门在身后关上。', {
       characters: [
         { id: 'player', name: '主角', role: 'player' },
         { id: 'venus', name: '维纳斯', role: 'npc' },
@@ -193,6 +247,39 @@ describe('parseAssistantResponse', () => {
     })
 
     expect(parsed.gameData?.statePatch).toMatchObject({ presentCharacterIds: ['venus', 'player'] })
+  })
+
+  it('applies each status update to the following story segment while keeping the final patch', () => {
+    const parsed = parseAssistantResponse([
+      '[状态] 地点：大厅；时间：傍晚；在场人物：维纳斯',
+      '[旁白] 门外传来脚步声。',
+      '[状态] 地点：走廊；时间：夜晚；在场人物：维纳斯、主角',
+      '维纳斯（平静）：我们到了。',
+    ].join('\n'), {
+      characters: [
+        { id: 'player', name: '主角', role: 'player' },
+        { id: 'venus', name: '维纳斯', role: 'npc' },
+      ],
+    })
+
+    expect(parsed.segments[0].statePatch).toEqual({ location: '大厅', time: '傍晚', presentCharacterIds: ['venus'] })
+    expect(parsed.segments[1].statePatch).toEqual({ location: '走廊', time: '夜晚', presentCharacterIds: ['venus', 'player'] })
+    expect(parsed.segments[1].presentCharacterIds).toEqual(['venus', 'player'])
+    expect(parsed.gameData?.statePatch).toEqual({ location: '走廊', time: '夜晚', presentCharacterIds: ['venus', 'player'] })
+  })
+
+  it('extracts client state transitions from choices without applying them as a state patch', () => {
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；章节：测试；在场人物：无\n[选项A] 留在大厅\n[选项B] 进入房间（后续叙事模式：NSFW）')
+
+    expect(parsed.choices[1]).toEqual({ id: 'B', text: '进入房间（后续叙事模式：NSFW）', targetContentMode: 'nsfw' })
+    expect(parsed.gameData?.statePatch).toEqual({ location: '大厅', time: '夜晚', presentCharacterIds: [] })
+  })
+
+  it('extracts mandatory next-state labels and preserves a following chapter-end marker', () => {
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；在场人物：无\n[选项A] 留在大厅（后续叙事模式：正常）\n[选项B] 离开大厅（后续叙事模式：NSFW）（结束章节）')
+
+    expect(parsed.choices[0]).toEqual({ id: 'A', text: '留在大厅（后续叙事模式：正常）', targetContentMode: 'normal' })
+    expect(parsed.choices[1]).toEqual({ id: 'B', text: '离开大厅（后续叙事模式：NSFW）（结束章节）', targetContentMode: 'nsfw' })
   })
 
   it('extracts character status lines, filters unknown names, and keeps the last update', () => {
@@ -261,5 +348,16 @@ describe('hasProtocolAnomaly', () => {
     expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n未知角色（平静）：继续吧。', context)).toBe(true)
     expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[说明] 这是额外说明。', context)).toBe(true)
     expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n[状态错误] 内容', context)).toBe(true)
+  })
+
+  it('accepts exactly one expected narrative mode switch', () => {
+    const switchingContext = {
+      ...context,
+      initialContentMode: 'normal',
+      contentMode: 'nsfw',
+    }
+    expect(hasProtocolAnomaly('[旁白] 收尾。\n[叙事模式切换] NSFW\n[旁白] 新场景。', switchingContext)).toBe(false)
+    expect(hasProtocolAnomaly('[旁白] 收尾。\n[叙事模式切换] 正常\n[旁白] 新场景。', switchingContext)).toBe(true)
+    expect(hasProtocolAnomaly('[叙事模式切换] NSFW\n[叙事模式切换] NSFW\n[旁白] 新场景。', switchingContext)).toBe(true)
   })
 })

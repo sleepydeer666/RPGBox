@@ -41,6 +41,7 @@ describe('RPGBox XML manifest', () => {
 
   it('never exports per-RPG AI settings in a share package', async () => {
     const game = createBlankGame(1)
+    game.modeStoryStylePrompts = { normal: '舒缓叙事', nsfw: '感官叙事' }
     game.aiSettings = {
       ...game.aiSettings,
       providerId: 'private-provider',
@@ -48,7 +49,7 @@ describe('RPGBox XML manifest', () => {
       temperature: 0.42,
     }
 
-    await exportRpgbox(game, { settings: true, characters: false, nsfw: false })
+    await exportRpgbox(game, { settings: true, characters: false })
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
@@ -56,41 +57,42 @@ describe('RPGBox XML manifest', () => {
     const sections = parseRpgboxXml(xml)
     expect(sections.settings).not.toHaveProperty('aiSettings')
     expect(sections.settings).not.toHaveProperty('note')
-    expect(sections.settings?.nsfwEnabled).toBe(false)
+    expect(sections.settings).not.toHaveProperty('nsfwEnabled')
     expect(sections.settings?.newStoryChoiceCount).toBe(4)
+    expect(sections.settings?.modeStoryStylePrompts).toEqual({ normal: '舒缓叙事', nsfw: '感官叙事' })
     expect(xml).not.toContain('private-provider')
     expect(xml).not.toContain('private-model')
   })
 
-  it('keeps character NSFW settings and NSFW-only portraits out of a normal character export', async () => {
+  it('exports complete character settings and portraits from every narrative mode', async () => {
     const game = createBlankGame(1)
-    game.characters[0].nsfwDescription = 'private-nsfw-setting'
+    game.characters[0].modeDescriptions = { nsfw: 'private-nsfw-setting' }
     game.characters[0].portraits = [
       { id: 'normal', expression: '平静', uri: 'file:///normal.png', groups: ['normal'] },
       { id: 'nsfw', expression: '特殊', uri: 'file:///nsfw.png', groups: ['nsfw'] },
     ]
 
-    await exportRpgbox(game, { settings: false, characters: true, nsfw: false })
+    await exportRpgbox(game, { settings: false, characters: true })
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
     const xml = await zip.file('rpg.xml')!.async('string')
     const sections = parseRpgboxXml(xml)
-    expect(sections.characters?.[0]).not.toHaveProperty('nsfwDescription')
-    expect(sections.characters?.[0].portraits.map((portrait) => portrait.id)).toEqual(['normal'])
-    expect(xml).not.toContain('private-nsfw-setting')
+    expect(sections.characters?.[0].modeDescriptions?.nsfw).toBe('private-nsfw-setting')
+    expect(sections.characters?.[0].portraits.map((portrait) => portrait.id)).toEqual(['normal', 'nsfw'])
+    expect(sections.nsfw?.characterSettings).toBeUndefined()
   })
 
-  it('includes character NSFW settings when the NSFW section is selected', async () => {
+  it('includes character NSFW settings with character exports', async () => {
     const game = createBlankGame(1)
-    game.characters[0].nsfwDescription = 'shared-nsfw-setting'
+    game.characters[0].modeDescriptions = { nsfw: 'shared-nsfw-setting' }
 
-    await exportRpgbox(game, { settings: false, characters: false, nsfw: true })
+    await exportRpgbox(game, { settings: false, characters: true })
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, { base64: true })
     const sections = parseRpgboxXml(await zip.file('rpg.xml')!.async('string'))
-    expect(sections.nsfw?.characterSettings?.[0].nsfwDescription).toBe('shared-nsfw-setting')
+    expect(sections.characters?.[0].modeDescriptions?.nsfw).toBe('shared-nsfw-setting')
   })
 
   it('imports a package selected through the system file picker', async () => {
@@ -104,17 +106,16 @@ describe('RPGBox XML manifest', () => {
     expect(filesystemMocks.readFile).not.toHaveBeenCalled()
   })
 
-  it('automatically enables NSFW when the imported package contains NSFW settings', async () => {
+  it('imports NSFW settings without a separate enable flag', async () => {
     const zip = new JSZip()
     zip.file('rpg.xml', createRpgboxXml('NSFW RPG', {
-      settings: { nsfwEnabled: false },
+      settings: {},
       nsfw: { nsfwScenePrompt: 'package NSFW settings' },
     }))
     const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'nsfw.rpgbox')
 
     const imported = await importRpgbox(file, createBlankGame(1))
 
-    expect(imported.nsfwEnabled).toBe(true)
     expect(imported.nsfwScenePrompt).toBe('package NSFW settings')
   })
 })

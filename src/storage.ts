@@ -1,10 +1,11 @@
-import { Preferences } from '@capacitor/preferences'
 import { DEFAULT_PROVIDER, DEFAULT_SYSTEM_PROMPT } from './config'
 import { createDefaultAiSettings, createDefaultCharacters, createDefaultNarrative, OPENING_MESSAGE } from './game'
 import { migrateLegacyNpcIds } from './lib/migrations'
 import { normalizeMemoryState } from './lib/memory'
 import { normalizeNewStoryChoiceCount } from './lib/prompt'
+import { DEFAULT_NARRATIVE_MODES, normalizeGameNarrativeModes } from './lib/narrativeModes'
 import type { ChatMessage, GameSession, GameState, NarrativeProgress, ProviderProfile } from './types'
+import { readStoredState, writeStoredState } from './platform/stateStore'
 
 const KEY = 'rpgbox-state-v1'
 
@@ -25,7 +26,7 @@ interface LegacyState {
 }
 
 export async function loadState(): Promise<Partial<PersistedState>> {
-  const { value } = await Preferences.get({ key: KEY })
+  const value = await readStoredState(KEY)
   if (!value) return {}
   try {
     const parsed = JSON.parse(value) as Partial<PersistedState> & LegacyState
@@ -55,33 +56,39 @@ export async function loadState(): Promise<Partial<PersistedState>> {
         legacy.chapter || '序章',
         legacy.messages[0]?.id ?? '',
       )
-      return migrateLegacyNpcIds({
-      ...legacy,
+      const { nsfwEnabled: _removedNsfwEnabled, ...legacyWithoutNsfwEnabled } = legacy as typeof legacy & { nsfwEnabled?: boolean }
+      return normalizeGameNarrativeModes(migrateLegacyNpcIds({
+      ...legacyWithoutNsfwEnabled,
       note: legacy.note ?? '',
-      nsfwEnabled: typeof legacy.nsfwEnabled === 'boolean' ? legacy.nsfwEnabled : true,
+      narrativeModes: legacy.narrativeModes ?? DEFAULT_NARRATIVE_MODES.map((mode) => ({ ...mode })),
       newStoryChoiceCount: normalizeNewStoryChoiceCount(legacy.newStoryChoiceCount),
       aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings },
       storyStylePrompt: legacy.storyStylePrompt ?? legacy.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+      modeStoryStylePrompts: legacy.modeStoryStylePrompts ?? {},
       chapterTransitionRules: legacy.chapterTransitionRules ?? '',
+      narrativeModeRulesPrompt: legacy.narrativeModeRulesPrompt ?? '',
       recommendedChapterTurnsEnabled: legacy.recommendedChapterTurnsEnabled ?? false,
       recommendedChapterTurns: clampRecommendedChapterTurns(legacy.recommendedChapterTurns),
       statusRulesPrompt: legacy.statusRulesPrompt ?? '',
       nsfwScenePrompt: legacy.nsfwScenePrompt ?? '',
       worldSettingPrompt: legacy.worldSettingPrompt ?? '',
-      characters: (legacy.characters?.length ? legacy.characters : createDefaultCharacters(legacy.gameState.focusCharacter)).map((character) => ({
-        ...character,
-        nsfwDescription: character.nsfwDescription ?? '',
+      characters: (legacy.characters?.length ? legacy.characters : createDefaultCharacters(legacy.gameState.focusCharacter)).map((character) => {
+        const legacyCharacter = character as typeof character & { nsfwDescription?: string }
+        const { nsfwDescription, ...characterWithoutNsfwDescription } = legacyCharacter
+        return {
+        ...characterWithoutNsfwDescription,
+        modeDescriptions: character.modeDescriptions ?? (nsfwDescription?.trim() ? { nsfw: nsfwDescription } : {}),
         statusBar: character.statusBar ?? '',
         portraits: (character.portraits ?? []).map((portrait) => ({
           ...portrait,
           tags: portrait.tags?.length ? portrait.tags : [portrait.expression].filter(Boolean),
-          groups: portrait.groups?.length ? portrait.groups : ['normal'],
+          groups: portrait.groups ?? ['normal'],
         })),
         defaultPortraitId: character.defaultPortraitId ?? character.portraits?.[0]?.id,
         defaultPortraitIds: character.defaultPortraitIds ?? {
           normal: character.defaultPortraitId ?? character.portraits?.[0]?.id,
         },
-      })),
+      }}),
       messages: legacy.messages.map((message) =>
         message.id === 'opening' && !message.content.includes('"segments"')
           ? { ...message, content: OPENING_MESSAGE }
@@ -98,7 +105,8 @@ export async function loadState(): Promise<Partial<PersistedState>> {
         narrative: chapterOnlyNarrative(snapshot.narrative, narrative.chapter.title, snapshot.narrative?.chapter.startedAtMessageId ?? ''),
         memory: normalizeMemoryState(snapshot.memory),
       })),
-    })})
+      }))
+    })
     if (!parsed.activeGameId || !parsed.games.some((game) => game.id === parsed.activeGameId)) {
       parsed.activeGameId = parsed.games[0]?.id ?? ''
     }
@@ -130,11 +138,15 @@ function chapterOnlyNarrative(narrative: NarrativeProgress | undefined, fallback
       title: legacyUnitTitle,
       startedAtMessageId: narrative.unit?.startedAtMessageId ?? narrative.chapter.startedAtMessageId,
     },
-  } : { chapter: narrative.chapter }
+    chapterPhase: legacyUnitTitle ? 'active' : narrative.chapterPhase,
+  } : {
+    chapter: narrative.chapter,
+    chapterPhase: narrative.chapterPhase ?? (narrative.chapter.title.trim() ? 'active' : 'opening'),
+  }
 }
 
 export async function saveState(state: PersistedState): Promise<void> {
-  await Preferences.set({ key: KEY, value: JSON.stringify(state) })
+  await writeStoredState(KEY, JSON.stringify(state))
 }
 
 export function createInitialProviderState() {

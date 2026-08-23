@@ -1,10 +1,12 @@
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import JSZip from 'jszip'
-import type { CharacterProfile, PortraitGroup } from '../types'
+import type { CharacterProfile, NarrativeMode } from '../types'
 import { readPortraitBase64, savePortraitBase64 } from './portraits'
+import { downloadBlob } from '../platform/browserDownload'
+import { isAndroidRuntime } from '../platform/runtime'
 
 export const ROLE_PACKAGE_DIRECTORY = 'RPGBox'
-export const ROLE_PACKAGE_DIRECTORY_LABEL = '内部存储/Documents/RPGBox'
+export const ROLE_PACKAGE_DIRECTORY_LABEL = isAndroidRuntime() ? '内部存储/Documents/RPGBox' : '浏览器下载目录'
 
 export type RolePackageImportSource = File
 
@@ -23,67 +25,80 @@ interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number],
 }
 
 interface SerializedRole extends Omit<CharacterProfile, 'portraits'> {
+  narrativeModes?: NarrativeMode[]
   portraits: SerializedPortrait[]
 }
 
-export async function exportRolePackage(character: CharacterProfile, includeNsfw: boolean): Promise<string> {
+export async function exportRolePackage(character: CharacterProfile, narrativeModes?: NarrativeMode[]): Promise<string> {
   if (character.role !== 'npc') throw new Error('只能导出 NPC')
   const zip = new JSZip()
   const portraits: SerializedPortrait[] = []
   for (const portrait of character.portraits) {
-    const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
-    const exportedGroups = includeNsfw ? groups : groups.filter((group) => group === 'normal')
-    if (!exportedGroups.length) continue
     const assetPath = `portraits/${safePathPart(portrait.id)}.${fileExtension(portrait.uri)}`
     zip.file(assetPath, await readPortraitBase64(portrait.uri), { base64: true })
     const { uri: _uri, ...metadata } = portrait
-    portraits.push({ ...metadata, groups: exportedGroups, assetPath })
+    portraits.push({ ...metadata, assetPath })
   }
   const includedIds = new Set(portraits.map((portrait) => portrait.id))
-  const { nsfwDescription: sourceNsfwDescription, ...baseCharacter } = structuredClone(character)
+  const portableCharacter = structuredClone(character)
   const role: SerializedRole = {
-    ...baseCharacter,
-    ...(includeNsfw ? { nsfwDescription: sourceNsfwDescription ?? '' } : {}),
+    ...portableCharacter,
     role: 'npc',
     portraits,
+    narrativeModes: narrativeModes?.map((mode) => ({ ...mode })),
     defaultPortraitId: includedIds.has(character.defaultPortraitId ?? '') ? character.defaultPortraitId : undefined,
-    defaultPortraitIds: Object.fromEntries(Object.entries(character.defaultPortraitIds ?? {})
-      .filter(([group, id]) => (includeNsfw || group === 'normal') && includedIds.has(id ?? ''))),
+    defaultPortraitIds: Object.fromEntries(Object.entries(character.defaultPortraitIds ?? {}).filter(([, id]) => includedIds.has(id ?? ''))),
   }
   zip.file('role.xml', createRoleXml(role))
-  const data = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } })
-  await ensureDirectory()
   const fileName = `${safeFileName(character.name || '未命名NPC')}-${fileStamp()}.role.rpgbox`
-  await Filesystem.writeFile({ path: `${ROLE_PACKAGE_DIRECTORY}/${fileName}`, data, directory: Directory.Documents, recursive: true })
+  if (isAndroidRuntime() || typeof document === 'undefined') {
+    const data = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+    await ensureDirectory()
+    await Filesystem.writeFile({ path: `${ROLE_PACKAGE_DIRECTORY}/${fileName}`, data, directory: Directory.Documents, recursive: true })
+  } else {
+    downloadBlob(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }), fileName)
+  }
   return `${ROLE_PACKAGE_DIRECTORY_LABEL}/${fileName}`
 }
 
-export async function importRolePackage(source: RolePackageImportSource, gameId: string, characterId: string): Promise<CharacterProfile> {
+export async function importRolePackage(source: RolePackageImportSource, gameId: string, characterId: string, targetModes?: NarrativeMode[]): Promise<CharacterProfile> {
   const fileName = source.name
   if (!/^[^/\\]+\.role\.rpgbox$/iu.test(fileName)) throw new Error('无效的角色包文件名')
   const zip = await JSZip.loadAsync(await source.arrayBuffer())
   const xmlFile = zip.file('role.xml')
   if (!xmlFile) throw new Error('角色包缺少 role.xml')
   const serialized = parseRoleXml(await xmlFile.async('string'))
+  const modeMap = createModeNameMap(serialized.narrativeModes, targetModes)
   const portraits: CharacterProfile['portraits'] = []
   for (const portrait of serialized.portraits ?? []) {
     if (!portrait.assetPath.startsWith('portraits/') || portrait.assetPath.includes('..')) continue
     const asset = zip.file(portrait.assetPath)
     if (!asset) continue
-    const { assetPath, ...metadata } = portrait
+    const { assetPath, groups: sourceGroups, ...metadata } = portrait
+    const groups = sourceGroups?.flatMap((group) => modeMap.get(group) ?? []).filter((group, index, values) => values.indexOf(group) === index)
+    if (serialized.narrativeModes?.length && targetModes && !groups?.length) continue
     const uri = await savePortraitBase64(gameId, characterId, await asset.async('base64'), fileExtension(assetPath))
-    portraits.push({ ...metadata, uri })
+    portraits.push({ ...metadata, groups: groups?.length ? groups : undefined, uri })
   }
   const portraitIds = new Set(portraits.map((portrait) => portrait.id))
+  const legacySerialized = serialized as typeof serialized & { nsfwDescription?: string }
+  const { nsfwDescription, narrativeModes: _narrativeModes, ...serializedWithoutNsfwDescription } = legacySerialized
+  const modeDescriptions = Object.fromEntries(Object.entries(serialized.modeDescriptions ?? {})
+    .flatMap(([group, description]) => modeMap.has(group) ? [[modeMap.get(group)!, description]] : []))
+  const defaultPortraitIds = Object.fromEntries(Object.entries(serialized.defaultPortraitIds ?? {})
+    .flatMap(([group, portraitId]) => modeMap.has(group) && portraitIds.has(portraitId ?? '') ? [[modeMap.get(group)!, portraitId]] : []))
+  const defaultPortraitId = modeMap.get(serialized.narrativeModes?.[0]?.id ?? '')
+    ? defaultPortraitIds[modeMap.get(serialized.narrativeModes?.[0]?.id ?? '')!]
+    : serialized.defaultPortraitId
   return {
-    ...serialized,
+    ...serializedWithoutNsfwDescription,
     id: characterId,
     role: 'npc',
-    nsfwDescription: serialized.nsfwDescription ?? '',
+    modeDescriptions,
     statusBar: serialized.statusBar ?? '',
     portraits,
-    defaultPortraitId: portraitIds.has(serialized.defaultPortraitId ?? '') ? serialized.defaultPortraitId : undefined,
-    defaultPortraitIds: Object.fromEntries(Object.entries(serialized.defaultPortraitIds ?? {}).filter(([, id]) => portraitIds.has(id ?? ''))),
+    defaultPortraitId: portraitIds.has(defaultPortraitId ?? '') ? defaultPortraitId : undefined,
+    defaultPortraitIds,
   }
 }
 
@@ -139,4 +154,14 @@ function fileExtension(path: string): string {
 
 function fileStamp(): string {
   return new Date().toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, '').replace('T', '-')
+}
+
+function createModeNameMap(sourceModes: NarrativeMode[] | undefined, targetModes: NarrativeMode[] | undefined): Map<string, string> {
+  if (!sourceModes?.length) return new Map([['normal', targetModes?.[0]?.id ?? 'normal']])
+  if (!targetModes?.length) return new Map(sourceModes.map((mode) => [mode.id, mode.id]))
+  const targetByName = new Map(targetModes.map((mode) => [mode.name, mode.id]))
+  return new Map(sourceModes.flatMap((mode) => {
+    const targetId = targetByName.get(mode.name)
+    return targetId ? [[mode.id, targetId] as const] : []
+  }))
 }

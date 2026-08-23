@@ -1,54 +1,76 @@
-import type { Choice, GameSession, ParsedResponse } from '../types'
+import type { Choice, GameSession } from '../types'
 
 export const CHAPTER_END_MARKER = '（结束章节）'
-export const CHAPTER_ENDING_CHOICE_INSTRUCTION = `在输出的选项中，提供至少一个用于推动本章节结束的选项，并标记${CHAPTER_END_MARKER}`
-export const CHAPTER_ENDING_FORBIDDEN_INSTRUCTION = '当前处于游戏开场或章节过渡阶段，不存在可结束的当前章节。过渡过程中不会触发章节结束逻辑，因此不得输出“[章节结束]”，无需生成或标记任何“（结束章节）”选项；请直接建立新章节的剧情引子并输出普通后续选项。'
-export const CHAPTER_NAMING_INSTRUCTION = '请在RPG状态中给新的章节命名'
+export const CHAPTER_ENDING_CHOICE_INSTRUCTION = `至少一个选项还必须在后续叙事模式标签之后标记${CHAPTER_END_MARKER}。`
+export const CHAPTER_CONTINUE_INSTRUCTION = '当前尽量不要生成章节结束的选项，保持故事推进。'
+export const PREFER_EROTIC_CHOICES_INSTRUCTION = '选项内容优先推动向色情方向发展。'
+export const CHAPTER_NAMING_INSTRUCTION = '紧接“[状态]”行输出“[新章节] 章节名称”。'
+const NEW_CHAPTER_DIRECTIONS_INSTRUCTION = '这些选项应涵盖不同角色、不同场景和不同故事方向。它们用于选择并开启下一章节，不是在结束章节；所有选项均不得添加“（结束章节）”标签。'
 
 export function buildTurnChoiceInstruction(
-  game: Pick<GameSession, 'messages' | 'newStoryChoiceCount'>,
-  endsChapter: boolean,
+  game: Pick<GameSession, 'messages' | 'newStoryChoiceCount' | 'narrative'>,
+  startsNewTransition: boolean,
 ): string {
   const choiceCount = Math.min(10, Math.max(4, Math.round(Number(game.newStoryChoiceCount) || 4)))
-  if (endsChapter) {
-    return `结束本章节，并开启新章节的剧情引子。之后输出${choiceCount}个后续选项，具体要求需参考章节切换规则中的相应内容`
+  if (startsNewTransition && game.narrative.chapterPhase === 'transition') {
+    return `继续章节间过渡，并生成${choiceCount}个新章节故事方向选项。${NEW_CHAPTER_DIRECTIONS_INSTRUCTION}`
   }
-  const isNewGame = !game.messages.some((message) => message.role === 'user')
-  if (isNewGame) {
-    return `输出${choiceCount}个后续选项，具体要求需参考章节切换规则中的相应内容`
+  if (startsNewTransition) {
+    return `收尾上一章节，并生成${choiceCount}个新章节故事方向选项。${NEW_CHAPTER_DIRECTIONS_INSTRUCTION}`
+  }
+  if (game.narrative.chapterPhase === 'opening') {
+    return `生成${choiceCount}个新章节故事方向选项。${NEW_CHAPTER_DIRECTIONS_INSTRUCTION}`
   }
   return '输出4个后续选项'
 }
 
 export function buildTurnInstructions(
   game: Pick<GameSession, 'messages' | 'newStoryChoiceCount' | 'narrative' | 'recommendedChapterTurnsEnabled' | 'recommendedChapterTurns' | 'chapterTransitionRules'>,
-  endsChapter: boolean,
+  startsNewTransition: boolean,
+  preferEroticChoices = false,
 ): string[] {
   const isNewGame = !game.messages.some((message) => message.role === 'user')
-  const instructions = [buildTurnChoiceInstruction(game, endsChapter)]
-  if (!endsChapter && shouldSuggestChapterEnding(game)) instructions.push(CHAPTER_ENDING_CHOICE_INSTRUCTION)
-  if (shouldRequestNewChapterName(game)) instructions.push(CHAPTER_NAMING_INSTRUCTION)
-  const transitionRules = (game.chapterTransitionRules ?? '').trim()
-  if ((isNewGame || endsChapter) && transitionRules) {
-    instructions.push(`章节切换规则：\n${transitionRules}`)
+  const instructions = [buildTurnChoiceInstruction(game, startsNewTransition)]
+  if (!startsNewTransition && game.narrative.chapterPhase === 'active') {
+    instructions.push(shouldSuggestChapterEnding(game)
+      ? CHAPTER_ENDING_CHOICE_INSTRUCTION
+      : CHAPTER_CONTINUE_INSTRUCTION)
   }
-  if (!endsChapter && (isNewGame || !game.narrative.chapter.title.trim())) {
-    instructions.push(CHAPTER_ENDING_FORBIDDEN_INSTRUCTION)
+  if (preferEroticChoices) instructions.push(PREFER_EROTIC_CHOICES_INSTRUCTION)
+  if (!startsNewTransition && shouldRequestNewChapterName(game)) instructions.push(CHAPTER_NAMING_INSTRUCTION)
+  const transitionRules = (game.chapterTransitionRules ?? '').trim()
+  if ((isNewGame || startsNewTransition) && transitionRules) {
+    instructions.push(`章节切换规则：\n${transitionRules}`)
   }
   return instructions
 }
 
-export function shouldRequestNewChapterName(game: Pick<GameSession, 'messages'>): boolean {
-  const recentAssistantMessages = game.messages
-    .filter((message) => message.role === 'assistant' && message.chapterTitle !== undefined)
-    .slice(-2)
-  return recentAssistantMessages.length === 2
-    && recentAssistantMessages.every((message) => !message.chapterTitle?.trim())
+export function shouldRequestNewChapterName(game: Pick<GameSession, 'narrative'>): boolean {
+  return game.narrative.chapterPhase === 'transition'
+}
+
+export function buildChapterProgressInstruction(
+  game: Pick<GameSession, 'messages' | 'narrative' | 'recommendedChapterTurnsEnabled' | 'recommendedChapterTurns'>,
+): string {
+  if (game.narrative.chapterPhase !== 'active' || !game.narrative.chapter.title.trim()) {
+    return '当前章节：章节间过渡。'
+  }
+  const turns = currentChapterTurnCount(game)
+  const maximum = game.recommendedChapterTurnsEnabled
+    ? `/${Math.min(30, Math.max(10, Math.round(game.recommendedChapterTurns ?? 20)))}`
+    : ''
+  return `当前章节：${game.narrative.chapter.title.trim()}；本章进度：${turns}${maximum}轮。`
 }
 
 export function selectedChoiceEndsChapter(choices: Choice[], selectedChoiceIds: string[]): boolean {
   const selectedIds = new Set(selectedChoiceIds.map((id) => id.toUpperCase()))
   return choices.some((choice) => selectedIds.has(choice.id.toUpperCase()) && choice.text.includes(CHAPTER_END_MARKER))
+}
+
+export function acceptNewChapterTitle(value: string | undefined, authorized: boolean): string | undefined {
+  if (!authorized) return undefined
+  const title = value?.trim()
+  return title || undefined
 }
 
 export function currentChapterTurnCount(game: Pick<GameSession, 'messages' | 'narrative'>): number {
@@ -74,15 +96,8 @@ export function chapterTurnCountBeforeLatestBoundary(
   }) + 1
 }
 
-export function reportedChapterTitle(parsed: ParsedResponse): string | undefined {
-  const boundary = [...parsed.progressEvents].reverse().find((event) =>
-    event.type === 'chapter_start' || event.type === 'chapter_end')
-  if (boundary?.type === 'chapter_end') return ''
-  if (boundary?.type === 'chapter_start') return boundary.title?.trim() ?? ''
-  return parsed.chapterTitle?.trim()
-}
-
 export function shouldSuggestChapterEnding(game: Pick<GameSession, 'messages' | 'narrative' | 'recommendedChapterTurnsEnabled' | 'recommendedChapterTurns'>): boolean {
+  if (game.narrative.chapterPhase !== 'active') return false
   if (!game.recommendedChapterTurnsEnabled) return false
   const threshold = Math.min(30, Math.max(10, Math.round(game.recommendedChapterTurns ?? 20)))
   return currentChapterTurnCount(game) >= threshold

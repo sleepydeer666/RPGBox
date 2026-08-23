@@ -4,12 +4,11 @@ import { applyRpgStatePatch } from './state'
 describe('applyRpgStatePatch', () => {
   const current = { location: '旅店', time: '夜晚', contentMode: 'normal' as const, values: {} }
 
-  it('accepts NSFW mode only when the RPG enables it', () => {
-    expect(applyRpgStatePatch(current, { contentMode: 'nsfw' }, true).contentMode).toBe('nsfw')
-    expect(applyRpgStatePatch(current, { contentMode: 'nsfw' }, false).contentMode).toBe('normal')
+  it('accepts a narrative mode update without an RPG-level gate', () => {
+    expect(applyRpgStatePatch(current, { contentMode: 'nsfw' }).contentMode).toBe('nsfw')
   })
 
-  it('normalizes an existing NSFW state when the RPG disables it', () => {
-    expect(applyRpgStatePatch({ ...current, contentMode: 'nsfw' }, undefined, false).contentMode).toBe('normal')
+  it('preserves the current narrative mode without a patch', () => {
+    expect(applyRpgStatePatch({ ...current, contentMode: 'nsfw' }, undefined).contentMode).toBe('nsfw')
   })
 })

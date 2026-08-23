@@ -26,11 +26,11 @@ describe('collectRecentActors', () => {
     expect(actors[0].expression).toBe('紧张')
   })
 
-  it('keeps actors across turns and clears them on a scene change', () => {
+  it('keeps actors across turns and replaces them from the complete present-character list', () => {
     const actors = collectRecentActors([
-      { segments: [{ type: 'dialogue', characterId: 'a', text: '一' }] },
-      { segments: [{ type: 'dialogue', characterId: 'b', text: '二' }] },
-      { sceneChanged: true, segments: [{ type: 'dialogue', characterId: 'c', text: '三' }] },
+      { segments: [{ type: 'dialogue', characterId: 'a', text: '一' }], presentCharacterIds: ['a'] },
+      { segments: [{ type: 'dialogue', characterId: 'b', text: '二' }], presentCharacterIds: ['a', 'b'] },
+      { segments: [{ type: 'dialogue', characterId: 'c', text: '三' }], presentCharacterIds: ['c'] },
     ], characters, 2)
 
     expect(actors.map((actor) => actor.character.id)).toEqual(['c'])
@@ -182,6 +182,19 @@ describe('temporary and choice actors', () => {
 
     expect(actors.map((actor) => actor.character.id)).toEqual(['a', 'c', 'd', 'e'])
     expect(actors[0].expression).toBe('生气')
+  })
+
+  it('includes the player portrait on the choice screen when the player is present', () => {
+    const player: CharacterProfile = {
+      id: 'player', role: 'player', name: '主角', gender: '', description: '', color: '#fff',
+      portraits: [{ id: 'player-normal', expression: '平静', uri: 'file:///player.png', groups: ['normal'] }],
+    }
+    const actors = collectTurnActors([
+      { type: 'dialogue', characterId: 'a', text: '准备好了吗？' },
+      { type: 'dialogue', characterId: 'player', text: '走吧。' },
+    ], [...characters, player], ['a', 'player'], 4)
+
+    expect(actors.map((actor) => actor.character.id)).toEqual(['a', 'player'])
   })
 
   it('falls back to this turn speakers when no present list was reported', () => {

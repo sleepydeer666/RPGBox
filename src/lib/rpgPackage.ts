@@ -1,16 +1,17 @@
-import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import JSZip from 'jszip'
 import { copyPortraitFile, readPortraitBase64, savePortraitFile } from './portraits'
 import type { CharacterProfile, GameSession, PortraitGroup } from '../types'
+import { normalizeGameNarrativeModes } from './narrativeModes'
+import { downloadBlob } from '../platform/browserDownload'
+import { isAndroidRuntime } from '../platform/runtime'
 
 export const RPGBOX_DIRECTORY = 'RPGBox'
-export const RPGBOX_DIRECTORY_LABEL = '内部存储/Documents/RPGBox'
+export const RPGBOX_DIRECTORY_LABEL = isAndroidRuntime() ? '内部存储/Documents/RPGBox' : '浏览器下载目录'
 
 export interface RpgExportOptions {
   settings: boolean
   characters: boolean
-  nsfw: boolean
 }
 
 export type RpgboxImportSource = File
@@ -23,7 +24,7 @@ interface SerializedPortrait extends Omit<CharacterProfile['portraits'][number],
   assetPath: string
 }
 
-interface SerializedCharacter extends Omit<CharacterProfile, 'portraits' | 'nsfwDescription'> {
+interface SerializedCharacter extends Omit<CharacterProfile, 'portraits'> {
   portraits: SerializedPortrait[]
 }
 
@@ -40,32 +41,28 @@ export interface PackageSections {
 }
 
 export async function exportRpgbox(game: GameSession, options: RpgExportOptions): Promise<string> {
-  if (!options.settings && !options.characters && !options.nsfw) throw new Error('请至少选择一项导出内容')
+  if (!options.settings && !options.characters) throw new Error('请至少选择一项导出内容')
   const zip = new JSZip()
   const sections: PackageSections = {}
 
   if (options.settings) sections.settings = exportSettings(game)
-  if (options.nsfw) sections.nsfw = {
-    nsfwScenePrompt: game.nsfwScenePrompt,
-    characterSettings: game.characters.map(({ id, name, nsfwDescription }) => ({ id, name, nsfwDescription: nsfwDescription ?? '' })),
+  if (options.settings || options.characters) sections.nsfw = {
+    nsfwScenePrompt: options.settings ? game.nsfwScenePrompt : '',
   }
   if (options.characters) {
     sections.characters = []
     for (const character of game.characters) {
       const portraits: SerializedPortrait[] = []
       for (const portrait of character.portraits) {
-        const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
-        const exportedGroups = options.nsfw ? groups : groups.filter((group) => group === 'normal')
-        if (!exportedGroups.length) continue
+        const groups: PortraitGroup[] = portrait.groups ?? ['normal']
         const extension = fileExtension(portrait.uri)
         const assetPath = `portraits/${safePathPart(character.id)}/${safePathPart(portrait.id)}.${extension}`
         // Portraits are already compressed image files; storing them avoids a costly DEFLATE pass.
         zip.file(assetPath, await readPortraitBase64(portrait.uri), { base64: true, compression: 'STORE' })
         const { uri: _uri, ...metadata } = portrait
-        portraits.push({ ...metadata, groups: exportedGroups, assetPath })
+        portraits.push({ ...metadata, groups, assetPath })
       }
-      const { nsfwDescription: _nsfwDescription, ...shareableCharacter } = character
-      sections.characters.push({ ...shareableCharacter, portraits })
+      sections.characters.push({ ...character, modeDescriptions: character.modeDescriptions ?? {}, portraits })
     }
   }
 
@@ -73,11 +70,14 @@ export async function exportRpgbox(game: GameSession, options: RpgExportOptions)
   await ensureRpgboxDirectory()
   const fileName = `${safeFileName(game.title || '未命名RPG')}-${fileStamp()}.rpgbox`
   const path = `${RPGBOX_DIRECTORY}/${fileName}`
-  if (Capacitor.isNativePlatform()) {
+  if (isAndroidRuntime()) {
     await writeZipInChunks(zip, path)
-  } else {
+  } else if (typeof document === 'undefined') {
     const data = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } })
     await Filesystem.writeFile({ path, data, directory: Directory.Documents, recursive: true })
+  } else {
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+    downloadBlob(blob, fileName)
   }
   return `${RPGBOX_DIRECTORY_LABEL}/${fileName}`
 }
@@ -147,7 +147,6 @@ export async function importRpgboxSections(
 
   if (sections.settings) game = { ...game, ...importSettings(sections.settings) }
   if (sections.nsfw) {
-    game.nsfwEnabled = true
     game.nsfwScenePrompt = sections.nsfw.nsfwScenePrompt ?? ''
   }
   if (sections.characters) {
@@ -166,11 +165,10 @@ export async function importRpgboxSections(
         portraitCompleted += 1
         options.onPortraitProgress?.(portraitCompleted, portraitTotal)
       }
-      const { nsfwDescription: _legacyNsfwDescription, ...shareableCharacter } = character as SerializedCharacter & { nsfwDescription?: string }
       characters.push({
-        ...shareableCharacter,
-        nsfwDescription: '',
-        statusBar: shareableCharacter.statusBar ?? '',
+        ...character,
+        modeDescriptions: character.modeDescriptions ?? {},
+        statusBar: character.statusBar ?? '',
         portraits,
       })
     }
@@ -180,11 +178,11 @@ export async function importRpgboxSections(
     game.characters = game.characters.map((character) => {
       const settings = sections.nsfw?.characterSettings?.find((item) => item.id === character.id)
         ?? sections.nsfw?.characterSettings?.find((item) => item.name === character.name)
-      return settings ? { ...character, nsfwDescription: settings.nsfwDescription ?? '' } : character
+      return settings ? { ...character, modeDescriptions: { ...character.modeDescriptions, nsfw: settings.nsfwDescription ?? '' } } : character
     })
   }
 
-  return { ...game, id: baseGame.id, title: baseGame.title, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) }
+  return normalizeGameNarrativeModes({ ...game, id: baseGame.id, title: baseGame.title, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) })
 }
 
 export async function cloneGameSession(game: GameSession, id: string, title: string): Promise<GameSession> {
@@ -227,10 +225,13 @@ export function parseRpgboxXml(xml: string): PackageSections {
 function exportSettings(game: GameSession): Record<string, unknown> {
   return {
     systemPrompt: game.systemPrompt,
-    nsfwEnabled: game.nsfwEnabled,
+    narrativeModes: game.narrativeModes,
+    nsfwScenePrompt: game.nsfwScenePrompt,
     newStoryChoiceCount: game.newStoryChoiceCount,
     storyStylePrompt: game.storyStylePrompt,
+    modeStoryStylePrompts: game.modeStoryStylePrompts ?? {},
     chapterTransitionRules: game.chapterTransitionRules ?? '',
+    narrativeModeRulesPrompt: game.narrativeModeRulesPrompt ?? '',
     recommendedChapterTurnsEnabled: game.recommendedChapterTurnsEnabled ?? false,
     recommendedChapterTurns: game.recommendedChapterTurns ?? 20,
     statusRulesPrompt: game.statusRulesPrompt ?? '',
@@ -244,7 +245,7 @@ function exportSettings(game: GameSession): Record<string, unknown> {
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'nsfwEnabled', 'newStoryChoiceCount', 'storyStylePrompt', 'chapterTransitionRules', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const allowed = ['systemPrompt', 'narrativeModes', 'newStoryChoiceCount', 'storyStylePrompt', 'modeStoryStylePrompts', 'chapterTransitionRules', 'narrativeModeRulesPrompt', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'nsfwScenePrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
   const imported = Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
   if (settings.newStoryChoiceCount !== undefined) {
     const parsed = Number(settings.newStoryChoiceCount)

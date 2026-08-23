@@ -1,7 +1,8 @@
 import JSZip from 'jszip'
 import { createRoleXml, parseRoleXml } from '../lib/rolePackage'
 import { createRpgboxXml, parseRpgboxXml, type PackageSections } from '../lib/rpgPackage'
-import type { CharacterProfile, CharacterPortrait, GameSession, PortraitGroup } from '../types'
+import { normalizeNarrativeModes } from '../lib/narrativeModes'
+import type { CharacterProfile, CharacterPortrait, GameSession, NarrativeMode, PortraitGroup } from '../types'
 
 export interface PortraitDraft extends Omit<CharacterPortrait, 'uri'> {
   file: Blob
@@ -17,16 +18,18 @@ interface SerializedPortrait extends Omit<CharacterPortrait, 'uri'> {
   assetPath: string
 }
 
-interface SerializedCharacter extends Omit<CharacterProfile, 'portraits' | 'nsfwDescription'> {
+interface SerializedCharacter extends Omit<CharacterProfile, 'portraits'> {
   portraits: SerializedPortrait[]
 }
 
 export interface RpgDraftSettings {
   title: string
-  nsfwEnabled: boolean
+  narrativeModes: NarrativeMode[]
   newStoryChoiceCount: number
   storyStylePrompt: string
+  modeStoryStylePrompts?: Partial<Record<PortraitGroup, string>>
   chapterTransitionRules: string
+  narrativeModeRulesPrompt: string
   recommendedChapterTurnsEnabled: boolean
   recommendedChapterTurns: number
   statusRulesPrompt: string
@@ -49,14 +52,11 @@ export interface ImportedRpgDraft {
   characters: CharacterDraft[]
 }
 
-export function groupsForExpression(expression: string): PortraitGroup[] {
-  const normalized = expression.trim()
-  if (normalized === '性高潮' || normalized === '大笑') return ['nsfw']
-  if (normalized === '羞耻') return ['normal', 'nsfw']
-  return ['normal']
+export function groupsForExpression(_expression: string, defaultModeId = 'normal'): PortraitGroup[] {
+  return [defaultModeId]
 }
 
-export function importBatchPortraits(files: File[], characterName: string, idFactory = createId): BatchPortraitResult {
+export function importBatchPortraits(files: File[], characterName: string, defaultModeId = 'normal', idFactory = createId): BatchPortraitResult {
   const portraits: PortraitDraft[] = []
   let failed = 0
   const prefix = `${characterName}_`
@@ -75,7 +75,7 @@ export function importBatchPortraits(files: File[], characterName: string, idFac
       id: idFactory('portrait'),
       expression,
       tags: [expression],
-      groups: groupsForExpression(expression),
+      groups: groupsForExpression(expression, defaultModeId),
       file,
       extension: 'png',
       previewUrl: URL.createObjectURL(file),
@@ -85,21 +85,63 @@ export function importBatchPortraits(files: File[], characterName: string, idFac
   return { portraits, imported: portraits.length, failed }
 }
 
-export function applyMissingDefaults(character: CharacterDraft): CharacterDraft {
-  const currentNormal = character.defaultPortraitIds?.normal ?? character.defaultPortraitId
-  const currentNsfw = character.defaultPortraitIds?.nsfw
-  const normalPortraits = character.portraits.filter((portrait) => portrait.groups?.includes('normal'))
-  const nsfwPortraits = character.portraits.filter((portrait) => portrait.groups?.includes('nsfw'))
-  const normalDefault = currentNormal || normalPortraits.find(hasNormalTag)?.id || normalPortraits[0]?.id
-  const nsfwDefault = currentNsfw || nsfwPortraits.find(hasShyTag)?.id || nsfwPortraits[0]?.id
+export function applyMissingDefaults(character: CharacterDraft, modes: NarrativeMode[] = [{ id: 'normal', name: '正常', color: '#65b7a5' }]): CharacterDraft {
+  const normalizedModes = normalizeNarrativeModes(modes)
+  const defaults = { ...character.defaultPortraitIds }
+  for (const [index, mode] of normalizedModes.entries()) {
+    const available = character.portraits.filter((portrait) => (portrait.groups ?? [normalizedModes[0].id]).includes(mode.id))
+    const current = defaults[mode.id] ?? (index === 0 ? character.defaultPortraitId : undefined)
+    if (current && available.some((portrait) => portrait.id === current)) defaults[mode.id] = current
+    else if (available[0]) defaults[mode.id] = available[0].id
+    else delete defaults[mode.id]
+  }
   return {
     ...character,
-    defaultPortraitId: normalDefault,
-    defaultPortraitIds: {
-      ...character.defaultPortraitIds,
-      ...(normalDefault ? { normal: normalDefault } : {}),
-      ...(nsfwDefault ? { nsfw: nsfwDefault } : {}),
-    },
+    defaultPortraitId: defaults[normalizedModes[0].id],
+    defaultPortraitIds: defaults,
+  }
+}
+
+export function bindRoleToNarrativeModes(character: CharacterDraft, modes: NarrativeMode[]): CharacterDraft {
+  const normalizedModes = normalizeNarrativeModes(modes)
+  const defaultModeId = normalizedModes[0].id
+  return applyMissingDefaults({
+    ...character,
+    modeDescriptions: {},
+    portraits: character.portraits.map((portrait) => ({ ...portrait, groups: [defaultModeId] })),
+    defaultPortraitIds: character.defaultPortraitId ? { [defaultModeId]: character.defaultPortraitId } : {},
+  }, normalizedModes)
+}
+
+export function removeDraftNarrativeMode(
+  settings: RpgDraftSettings,
+  characters: CharacterDraft[],
+  modeId: string,
+): { settings: RpgDraftSettings; characters: CharacterDraft[] } {
+  const modes = normalizeNarrativeModes(settings.narrativeModes)
+  if (modes.length <= 1) return { settings, characters }
+  const index = modes.findIndex((mode) => mode.id === modeId)
+  if (index < 0) return { settings, characters }
+  const nextModes = modes.filter((mode) => mode.id !== modeId)
+  const targetId = index > 0 ? modes[index - 1].id : nextModes[0].id
+  const modeStoryStylePrompts = migrateTextRecord(settings.modeStoryStylePrompts, modeId, targetId)
+  return {
+    settings: { ...settings, narrativeModes: nextModes, modeStoryStylePrompts },
+    characters: characters.map((character) => {
+      const modeDescriptions = migrateTextRecord(character.modeDescriptions, modeId, targetId)
+      const defaults = { ...character.defaultPortraitIds }
+      const removedDefault = defaults[modeId]
+      delete defaults[modeId]
+      if (!defaults[targetId] && removedDefault) defaults[targetId] = removedDefault
+      const portraits = character.portraits.map((portrait) => {
+        const groups = portrait.groups ?? [modes[0].id]
+        const migrated = groups.includes(modeId) && groups.length === 1
+          ? [targetId]
+          : groups.filter((group) => group !== modeId)
+        return { ...portrait, groups: Array.from(new Set(migrated)) }
+      })
+      return applyMissingDefaults({ ...character, modeDescriptions, portraits, defaultPortraitIds: defaults }, nextModes)
+    }),
   }
 }
 
@@ -115,7 +157,7 @@ export async function readRolePackage(file: File): Promise<CharacterDraft> {
     const asset = zip.file(portrait.assetPath)
     if (!asset) continue
     const fileBlob = await asset.async('blob')
-    const { assetPath, uri: _legacyUri, ...metadata } = portrait as typeof portrait & { uri?: string }
+    const { assetPath, uri: _legacyUri, groups: _groups, ...metadata } = portrait as typeof portrait & { uri?: string }
     portraits.push({
       ...metadata,
       file: fileBlob,
@@ -127,9 +169,10 @@ export async function readRolePackage(file: File): Promise<CharacterDraft> {
     ...role,
     id: createId('npc'),
     role: 'npc',
-    nsfwDescription: role.nsfwDescription ?? '',
+    modeDescriptions: {},
     statusBar: role.statusBar ?? '',
-    portraits,
+    portraits: portraits.map((portrait) => ({ ...portrait, groups: undefined })),
+    defaultPortraitIds: {},
   }
 }
 
@@ -164,7 +207,7 @@ export async function readRpgPackage(file: File): Promise<ImportedRpgDraft> {
     characters.push({
       ...serialized,
       role: serialized.role === 'player' ? 'player' : 'npc',
-      nsfwDescription: nsfwSettings?.nsfwDescription ?? '',
+      modeDescriptions: serialized.modeDescriptions ?? (nsfwSettings?.nsfwDescription ? { nsfw: nsfwSettings.nsfwDescription } : {}),
       statusBar: serialized.statusBar ?? '',
       portraits,
     })
@@ -173,10 +216,14 @@ export async function readRpgPackage(file: File): Promise<ImportedRpgDraft> {
   return {
     settings: {
       title: titleAttribute ? decodeXmlAttribute(titleAttribute) : file.name.replace(/\.rpgbox$/iu, ''),
-      nsfwEnabled: Boolean(sourceSettings.nsfwEnabled || sections.nsfw),
+      narrativeModes: normalizeNarrativeModes(Array.isArray(sourceSettings.narrativeModes) ? sourceSettings.narrativeModes as NarrativeMode[] : undefined),
       newStoryChoiceCount: numberValue(sourceSettings.newStoryChoiceCount),
       storyStylePrompt: stringValue(sourceSettings.storyStylePrompt),
+      modeStoryStylePrompts: isRecord(sourceSettings.modeStoryStylePrompts)
+        ? Object.fromEntries(Object.entries(sourceSettings.modeStoryStylePrompts).map(([key, value]) => [key, stringValue(value)]))
+        : {},
       chapterTransitionRules: stringValue(sourceSettings.chapterTransitionRules),
+      narrativeModeRulesPrompt: stringValue(sourceSettings.narrativeModeRulesPrompt),
       recommendedChapterTurnsEnabled: Boolean(sourceSettings.recommendedChapterTurnsEnabled),
       recommendedChapterTurns: numberValue(sourceSettings.recommendedChapterTurns),
       statusRulesPrompt: stringValue(sourceSettings.statusRulesPrompt),
@@ -194,8 +241,15 @@ export async function readRpgPackage(file: File): Promise<ImportedRpgDraft> {
 export async function buildRolePackage(character: CharacterDraft): Promise<Blob> {
   if (!character.name.trim()) throw new Error('请填写人物姓名')
   const zip = new JSZip()
-  const portraits = await addPortraits(zip, character, `portraits`, true)
-  const role = { ...withoutDraftPortraits(character), role: 'npc' as const, portraits }
+  const portraits = (await addPortraits(zip, character, 'portraits')).map(({ groups: _groups, ...portrait }) => portrait)
+  const { modeDescriptions: _modeDescriptions, defaultPortraitIds: _defaultPortraitIds, narrativeModes: _narrativeModes, ...base } = withoutDraftPortraits(character) as CharacterProfile & { narrativeModes?: unknown }
+  const includedIds = new Set(portraits.map((portrait) => portrait.id))
+  const role = {
+    ...base,
+    role: 'npc' as const,
+    portraits,
+    defaultPortraitId: includedIds.has(base.defaultPortraitId ?? '') ? base.defaultPortraitId : portraits[0]?.id,
+  }
   zip.file('role.xml', createRoleXml(role))
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
 }
@@ -205,43 +259,44 @@ export async function buildRpgPackage(settings: RpgDraftSettings, player: Charac
   const zip = new JSZip()
   const characters = [player, ...participants]
   const serializedCharacters: SerializedCharacter[] = await Promise.all(characters.map(async (character) => {
-    const { nsfwDescription: _nsfwDescription, ...base } = withoutDraftPortraits(character)
-    const portraits = await addPortraits(zip, character, `portraits/${safePathPart(character.id)}`, settings.nsfwEnabled)
+    const base = withoutDraftPortraits(character)
+    const portraits = await addPortraits(zip, character, `portraits/${safePathPart(character.id)}`)
     const includedIds = new Set(portraits.map((portrait) => portrait.id))
     return {
       ...base,
       portraits,
       defaultPortraitId: includedIds.has(base.defaultPortraitId ?? '') ? base.defaultPortraitId : undefined,
       defaultPortraitIds: Object.fromEntries(Object.entries(base.defaultPortraitIds ?? {})
-        .filter(([group, id]) => (settings.nsfwEnabled || group === 'normal') && includedIds.has(id ?? ''))),
+        .filter(([, id]) => includedIds.has(id ?? ''))),
     }
   }))
   const now = Date.now()
+  const narrativeModes = normalizeNarrativeModes(settings.narrativeModes)
+  const defaultModeId = narrativeModes[0].id
   const openingId = `opening-${now}`
   const sections: PackageSections = {
     settings: {
       systemPrompt: settings.storyStylePrompt,
-      nsfwEnabled: settings.nsfwEnabled,
+      narrativeModes,
       newStoryChoiceCount: clamp(settings.newStoryChoiceCount, 4, 10),
       storyStylePrompt: settings.storyStylePrompt,
+      modeStoryStylePrompts: settings.modeStoryStylePrompts ?? {},
       chapterTransitionRules: settings.chapterTransitionRules,
+      narrativeModeRulesPrompt: settings.narrativeModeRulesPrompt,
       recommendedChapterTurnsEnabled: settings.recommendedChapterTurnsEnabled,
       recommendedChapterTurns: clamp(settings.recommendedChapterTurns, 10, 30),
       statusRulesPrompt: settings.statusRulesPrompt,
       worldSettingPrompt: settings.worldSettingPrompt,
       messages: [{ id: openingId, role: 'assistant', content: settings.openingMessage || '新的旅程尚未留下文字。', createdAt: now }],
-      gameState: { location: settings.location, time: settings.time, contentMode: 'normal', values: {} },
+      gameState: { location: settings.location, time: settings.time, contentMode: defaultModeId, values: {} },
       narrative: { chapter: { id: `chapter-${now}`, title: settings.chapterTitle, startedAtMessageId: openingId } },
       memory: { historicalSummary: '', recentChapters: [], recentChapterLimit: 5 },
       rollbackLog: [],
     } satisfies Partial<GameSession>,
     characters: serializedCharacters,
   }
-  if (settings.nsfwEnabled) {
-    sections.nsfw = {
-      nsfwScenePrompt: settings.nsfwScenePrompt,
-      characterSettings: characters.map((character) => ({ id: character.id, name: character.name, nsfwDescription: character.nsfwDescription ?? '' })),
-    }
+  sections.nsfw = {
+    nsfwScenePrompt: settings.nsfwScenePrompt,
   }
   zip.file('rpg.xml', createRpgboxXml(settings.title, sections))
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
@@ -266,16 +321,14 @@ export function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-async function addPortraits(zip: JSZip, character: CharacterDraft, basePath: string, includeNsfw: boolean): Promise<SerializedPortrait[]> {
+async function addPortraits(zip: JSZip, character: CharacterDraft, basePath: string): Promise<SerializedPortrait[]> {
   return Promise.all(character.portraits.flatMap((portrait) => {
-    const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
-    const exportedGroups = includeNsfw ? groups : groups.filter((group) => group === 'normal')
-    if (!exportedGroups.length) return []
+    const groups: PortraitGroup[] = portrait.groups ?? ['normal']
     return [async () => {
     const assetPath = `${basePath}/${safePathPart(portrait.id)}.${portrait.extension}`
     zip.file(assetPath, await portrait.file.arrayBuffer(), { compression: 'STORE' })
     const { file: _file, previewUrl: _previewUrl, extension: _extension, ...metadata } = portrait
-    return { ...metadata, groups: exportedGroups, assetPath }
+    return { ...metadata, groups, assetPath }
     }]
   }).map((createPortrait) => createPortrait()))
 }
@@ -283,14 +336,6 @@ async function addPortraits(zip: JSZip, character: CharacterDraft, basePath: str
 function withoutDraftPortraits(character: CharacterDraft): Omit<CharacterProfile, 'portraits'> {
   const { portraits: _portraits, ...base } = character
   return base
-}
-
-function hasNormalTag(portrait: PortraitDraft): boolean {
-  return portrait.expression.trim() === '正常' || portrait.tags?.some((tag) => tag.trim() === '正常') === true
-}
-
-function hasShyTag(portrait: PortraitDraft): boolean {
-  return portrait.expression.trim() === '羞耻' || portrait.tags?.some((tag) => tag.trim() === '羞耻') === true
 }
 
 function safePathPart(value: string): string {
@@ -316,6 +361,18 @@ function stringValue(value: unknown): string {
 function numberValue(value: unknown): number | undefined {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function migrateTextRecord(
+  source: Partial<Record<string, string>> | undefined,
+  removedId: string,
+  targetId: string,
+): Partial<Record<string, string>> {
+  const next = { ...source }
+  const removed = next[removedId]?.trim()
+  delete next[removedId]
+  if (removed) next[targetId] = [next[targetId]?.trim(), removed].filter(Boolean).join('\n')
+  return next
 }
 
 function decodeXmlAttribute(value: string): string {

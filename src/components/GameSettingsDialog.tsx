@@ -1,13 +1,14 @@
-import { BookOpen, Download, Eye, FileUp, ImagePlus, Plus, SlidersHorizontal, Star, Trash2, Users, X } from 'lucide-react'
+import { BookOpen, Compass, Download, Eye, FileUp, ImagePlus, Plus, SlidersHorizontal, Star, Trash2, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { copyPortraitFile, deletePortraitFile, portraitSource, savePortraitFile } from '../lib/portraits'
 import { createNpcId } from '../lib/migrations'
 import { clampRecentChapterLimit, normalizeMemoryState } from '../lib/memory'
-import type { CharacterPortrait, CharacterProfile, GameSession, PortraitGroup, ProviderProfile } from '../types'
+import type { CharacterPortrait, CharacterProfile, GameSession, NarrativeMode, PortraitGroup, ProviderProfile } from '../types'
 import { formatPortraitTags, parsePortraitTags } from '../lib/portraitTags'
 import { hexToHsv, hsvToHex, normalizeHexColor, type HsvColor } from '../lib/color'
 import PortraitCropDialog from './PortraitCropDialog'
 import { exportRolePackage, importRolePackage, inspectRolePackage, ROLE_PACKAGE_DIRECTORY_LABEL } from '../lib/rolePackage'
+import { adaptCharacterNarrativeModes, availableNarrativeModes, createNarrativeMode, defaultNarrativeModeId, normalizeNarrativeModes, removeNarrativeMode, uniqueNarrativeModeName } from '../lib/narrativeModes'
 
 interface Props {
   game: GameSession
@@ -18,27 +19,32 @@ interface Props {
   onChange: (game: GameSession) => void
 }
 
-type Tab = 'ai' | 'game' | 'characters'
+type Tab = 'ai' | 'rules' | 'preferences' | 'characters'
 
 type AddCharacterMode = 'new' | 'clone' | 'import'
 type RoleImportMode = 'new' | 'replace' | 'portraits'
 
+const RECOMMENDED_CHAPTER_TURNS_DISABLED = 9
+
 export default function GameSettingsDialog({ game, games, providers, fullSystemPrompt, onClose, onChange }: Props) {
   const [tab, setTab] = useState<Tab>('ai')
   const [selectedCharacterId, setSelectedCharacterId] = useState(game.characters[0]?.id ?? '')
+  const [selectedCharacterModeId, setSelectedCharacterModeId] = useState(game.gameState.contentMode)
+  const [selectedNarrativeStyleId, setSelectedNarrativeStyleId] = useState<PortraitGroup | 'global'>('global')
   const [portraitError, setPortraitError] = useState('')
   const [cropTarget, setCropTarget] = useState<{ characterId: string; file: File } | null>(null)
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
   const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 15))
   const [memoryLimitDraft, setMemoryLimitDraft] = useState(String(game.memory.recentChapterLimit ?? 5))
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
+  const [narrativeModeNameDrafts, setNarrativeModeNameDrafts] = useState<Record<string, string>>({})
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
   const [addCharacterMode, setAddCharacterMode] = useState<AddCharacterMode>('new')
   const [cloneGameId, setCloneGameId] = useState(game.id)
   const [cloneCharacterId, setCloneCharacterId] = useState('')
   const [pickedRoleFile, setPickedRoleFile] = useState<File | null>(null)
   const [exportCharacter, setExportCharacter] = useState<CharacterProfile | null>(null)
-  const [exportNsfw, setExportNsfw] = useState(false)
+  const [portraitManagerOpen, setPortraitManagerOpen] = useState(false)
   const [roleWorking, setRoleWorking] = useState(false)
   const [roleNotice, setRoleNotice] = useState('')
   const [roleImportMode, setRoleImportMode] = useState<RoleImportMode | null>(null)
@@ -46,8 +52,19 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   const cloneCandidates = cloneGame.characters.filter((character) => character.role === 'npc')
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
   const selectedCharacter = game.characters.find((character) => character.id === selectedCharacterId) ?? game.characters[0]
-  const visiblePortraits = selectedCharacter?.portraits.filter((portrait) => game.nsfwEnabled
-    || (portrait.groups?.length ? portrait.groups : ['normal']).includes('normal')) ?? []
+  const narrativeModes = normalizeNarrativeModes(game.narrativeModes)
+  const availableModes = availableNarrativeModes(game)
+  const defaultModeId = defaultNarrativeModeId(game)
+  const selectedCharacterMode = availableModes.find((mode) => mode.id === selectedCharacterModeId) ?? availableModes[0]
+  const selectedModeId = selectedCharacterMode?.id ?? defaultModeId
+  const sortedPortraits = selectedCharacter ? [...selectedCharacter.portraits].sort((left, right) => {
+    const defaultPortraitId = selectedCharacter.defaultPortraitIds?.[selectedModeId]
+      ?? (selectedModeId === defaultModeId ? selectedCharacter.defaultPortraitId : undefined)
+    const rank = (portrait: CharacterPortrait) => portrait.id === defaultPortraitId
+      ? 0
+      : (portrait.groups ?? [defaultModeId]).includes(selectedModeId) ? 1 : 2
+    return rank(left) - rank(right) || selectedCharacter.portraits.indexOf(left) - selectedCharacter.portraits.indexOf(right)
+  }) : []
   const models = useMemo(() => Array.from(new Set([
     ...(selectedProvider?.models?.length ? selectedProvider.models : selectedProvider?.model ? [selectedProvider.model] : []),
     game.aiSettings.model,
@@ -58,9 +75,20 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   }, [game.characters, selectedCharacter])
 
   useEffect(() => {
+    if (!availableModes.some((mode) => mode.id === selectedCharacterModeId)) setSelectedCharacterModeId(availableModes[0]?.id ?? '')
+  }, [availableModes, selectedCharacterModeId])
+
+  useEffect(() => {
+    if (selectedNarrativeStyleId !== 'global' && !availableModes.some((mode) => mode.id === selectedNarrativeStyleId)) {
+      setSelectedNarrativeStyleId('global')
+    }
+  }, [availableModes, selectedNarrativeStyleId])
+
+  useEffect(() => {
     setContextTurnsDraft(String(game.aiSettings.contextTurns ?? 15))
     setMemoryLimitDraft(String(game.memory.recentChapterLimit ?? 5))
     setPortraitTagDrafts({})
+    setNarrativeModeNameDrafts({})
   }, [game.id])
 
   useEffect(() => {
@@ -74,13 +102,6 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
 
   function patchGame(patch: Partial<GameSession>) {
     onChange({ ...game, ...patch, updatedAt: Date.now() })
-  }
-
-  function setNsfwEnabled(nsfwEnabled: boolean) {
-    patchGame({
-      nsfwEnabled,
-      gameState: nsfwEnabled ? game.gameState : { ...game.gameState, contentMode: 'normal' },
-    })
   }
 
   function commitNumericSettings(closeAfter = false) {
@@ -127,7 +148,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
       name: `NPC ${game.characters.filter((character) => character.role === 'npc').length + 1}`,
       gender: '',
       description: '',
-      nsfwDescription: '',
+      modeDescriptions: {},
       statusBar: '',
       color: '#d3ab61',
       portraits: [],
@@ -158,11 +179,12 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         const clone = structuredClone(source)
         clone.id = id
         clone.role = 'npc'
-        clone.portraits = await Promise.all(clone.portraits.map(async (portrait) => ({
+        const adaptedClone = adaptCharacterNarrativeModes(clone, cloneGame.narrativeModes, narrativeModes)
+        adaptedClone.portraits = await Promise.all(adaptedClone.portraits.map(async (portrait) => ({
           ...portrait,
           uri: await copyPortraitFile(portrait.uri, game.id, id),
         })))
-        patchGame({ characters: [...game.characters, clone] })
+        patchGame({ characters: [...game.characters, adaptedClone] })
         setSelectedCharacterId(id)
       } else {
         if (!pickedRoleFile) throw new Error('请选择要导入的角色包')
@@ -175,7 +197,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         const mode = roleImportMode ?? 'new'
         const id = mode === 'new' ? createNpcId() : existing?.id
         if (!id) throw new Error('找不到要处理的同名角色')
-        const imported = await importRolePackage(pickedRoleFile, game.id, id)
+        const imported = await importRolePackage(pickedRoleFile, game.id, id, narrativeModes)
         if (mode === 'replace') {
           await Promise.all((existing?.portraits ?? []).map((portrait) => deletePortraitFile(portrait.uri)))
           patchGame({ characters: game.characters.map((character) => character.id === id ? { ...imported, id } : character) })
@@ -222,7 +244,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     setRoleWorking(true)
     setRoleNotice('')
     try {
-      const path = await exportRolePackage(exportCharacter, exportNsfw)
+      const path = await exportRolePackage(exportCharacter, narrativeModes)
       setRoleNotice(`已导出：${path}`)
       setExportCharacter(null)
     } catch (error) {
@@ -243,11 +265,11 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         id: portraitId,
         expression: character.portraits.length ? `expression-${character.portraits.length + 1}` : 'neutral',
         tags: [character.portraits.length ? `expression-${character.portraits.length + 1}` : 'neutral'],
-        groups: ['normal'],
+        groups: [selectedModeId],
         uri,
-      }], defaultPortraitId: character.defaultPortraitId ?? portraitId, defaultPortraitIds: {
+      }], defaultPortraitId: selectedModeId === defaultModeId ? character.defaultPortraitId ?? portraitId : character.defaultPortraitId, defaultPortraitIds: {
         ...character.defaultPortraitIds,
-        normal: character.defaultPortraitIds?.normal ?? character.defaultPortraitId ?? portraitId,
+        [selectedModeId]: character.defaultPortraitIds?.[selectedModeId] ?? (selectedModeId === defaultModeId ? character.defaultPortraitId : undefined) ?? portraitId,
       } })
       setCropTarget(null)
     } catch (error) {
@@ -257,12 +279,23 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
 
   async function removePortrait(character: CharacterProfile, portraitId: string) {
     const portrait = character.portraits.find((item) => item.id === portraitId)
-    if (portrait) await deletePortraitFile(portrait.uri)
+    if (!portrait || !window.confirm(`确认删除立绘“${portrait.tags?.[0] || portrait.expression || '未命名立绘'}”？删除后无法恢复。`)) return
+    await deletePortraitFile(portrait.uri)
     const portraits = character.portraits.filter((item) => item.id !== portraitId)
+    const defaultPortraitIds = { ...character.defaultPortraitIds }
+    for (const mode of availableModes) {
+      const currentDefault = defaultPortraitIds[mode.id]
+        ?? (mode.id === defaultModeId ? character.defaultPortraitId : undefined)
+      if (currentDefault === portraitId) {
+        const replacement = portraits.find((item) => (item.groups ?? [defaultModeId]).includes(mode.id))
+        if (replacement) defaultPortraitIds[mode.id] = replacement.id
+        else delete defaultPortraitIds[mode.id]
+      }
+    }
     patchCharacter(character.id, {
       portraits,
-      defaultPortraitId: character.defaultPortraitId === portraitId ? portraits[0]?.id : character.defaultPortraitId,
-      defaultPortraitIds: Object.fromEntries(Object.entries(character.defaultPortraitIds ?? {}).filter(([, id]) => id !== portraitId)),
+      defaultPortraitId: defaultPortraitIds[defaultModeId],
+      defaultPortraitIds,
     })
   }
 
@@ -285,22 +318,51 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   }
 
   function togglePortraitGroup(character: CharacterProfile, portrait: CharacterPortrait, group: PortraitGroup, checked: boolean) {
-    const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
+    const groups: PortraitGroup[] = portrait.groups ?? [defaultModeId]
     const nextGroups = checked ? Array.from(new Set([...groups, group])) : groups.filter((item) => item !== group)
     const defaults = { ...character.defaultPortraitIds }
     if (!checked && defaults[group] === portrait.id) delete defaults[group]
     patchCharacter(character.id, {
       portraits: character.portraits.map((item) => item.id === portrait.id ? { ...item, groups: nextGroups } : item),
       defaultPortraitIds: defaults,
-      defaultPortraitId: group === 'normal' && !checked && character.defaultPortraitId === portrait.id ? undefined : character.defaultPortraitId,
+      defaultPortraitId: group === defaultModeId && !checked && character.defaultPortraitId === portrait.id ? undefined : character.defaultPortraitId,
     })
   }
 
   function setGroupDefault(character: CharacterProfile, portrait: CharacterPortrait, group: PortraitGroup) {
+    const groups = portrait.groups ?? [defaultModeId]
     patchCharacter(character.id, {
+      portraits: groups.includes(group)
+        ? character.portraits
+        : character.portraits.map((item) => item.id === portrait.id ? { ...item, groups: [...groups, group] } : item),
       defaultPortraitIds: { ...character.defaultPortraitIds, [group]: portrait.id },
-      defaultPortraitId: group === 'normal' ? portrait.id : character.defaultPortraitId,
+      defaultPortraitId: group === defaultModeId ? portrait.id : character.defaultPortraitId,
     })
+  }
+
+  function addNarrativeMode() {
+    patchGame({ narrativeModes: [...narrativeModes, createNarrativeMode(narrativeModes)] })
+  }
+
+  function patchNarrativeMode(modeId: string, patch: Partial<NarrativeMode>) {
+    patchGame({ narrativeModes: narrativeModes.map((mode) => mode.id === modeId ? { ...mode, ...patch } : mode) })
+  }
+
+  function finishNarrativeModeName(mode: NarrativeMode, value: string) {
+    if (!value.trim()) {
+      setNarrativeModeNameDrafts((current) => ({ ...current, [mode.id]: mode.name }))
+      return
+    }
+    const name = uniqueNarrativeModeName(narrativeModes, mode.id, value)
+    setNarrativeModeNameDrafts((current) => ({ ...current, [mode.id]: name }))
+    patchNarrativeMode(mode.id, { name })
+  }
+
+  function deleteNarrativeMode(modeId: string) {
+    if (narrativeModes.length <= 1) return
+    const mode = narrativeModes.find((item) => item.id === modeId)
+    if (!mode || !window.confirm(`删除叙事模式“${mode.name}”？仅属于该模式的立绘和特殊设定将迁移到相邻的前一个模式。`)) return
+    onChange(removeNarrativeMode(game, modeId))
   }
 
   function removeCharacter(character: CharacterProfile) {
@@ -315,7 +377,8 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         <div className="modal-head"><div><span className="eyebrow">CURRENT RPG</span><h2>RPG设置</h2></div><button className="icon-button" onClick={closeDialog} title="关闭"><X size={20} /></button></div>
         <nav className="game-settings-tabs" aria-label="RPG设置分类">
           <button className={tab === 'ai' ? 'active' : ''} onClick={() => setTab('ai')}><SlidersHorizontal size={16} />AI设置</button>
-          <button className={tab === 'game' ? 'active' : ''} onClick={() => setTab('game')}><BookOpen size={16} />RPG设置</button>
+          <button className={tab === 'rules' ? 'active' : ''} onClick={() => setTab('rules')}><BookOpen size={16} />RPG规则</button>
+          <button className={tab === 'preferences' ? 'active' : ''} onClick={() => setTab('preferences')}><Compass size={16} />设定与偏好</button>
           <button className={tab === 'characters' ? 'active' : ''} onClick={() => setTab('characters')}><Users size={16} />登场人物</button>
         </nav>
 
@@ -326,6 +389,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <label>模型<select value={game.aiSettings.model} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, model: event.target.value } })}>{models.map((model) => <option value={model} key={model}>{model}</option>)}</select></label>
             </div>
             <div className="form-section"><h3>模型参数</h3>
+              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.useCompatiblePromptFormat ?? true} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, useCompatiblePromptFormat: event.target.checked } })} /><span><strong>使用兼容格式</strong><small>关闭兼容模式理论上能够提升稳定性，但部分API不支持。如果LLM返回的格式、内容不符合要求，请保持此选项开启。</small></span></label>
               <ParameterSlider label="温度" min={0} max={2} step={0.05} value={game.aiSettings.temperature} onChange={(temperature) => patchGame({ aiSettings: { ...game.aiSettings, temperature } })} />
               <ParameterSlider label="Top P" min={0} max={1} step={0.05} value={game.aiSettings.topP} onChange={(topP) => patchGame({ aiSettings: { ...game.aiSettings, topP } })} />
               <ParameterSlider label="存在惩罚" min={-2} max={2} step={0.05} value={game.aiSettings.presencePenalty} onChange={(presencePenalty) => patchGame({ aiSettings: { ...game.aiSettings, presencePenalty } })} />
@@ -337,13 +401,20 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
             <div className="form-section"><h3>输出检查</h3><label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label></div>
           </section>}
 
-          {tab === 'game' && <section className="game-tab-panel">
-            <div className="form-section"><h3>内容模式</h3><label className="nsfw-mode-toggle"><input type="checkbox" checked={game.nsfwEnabled} onChange={(event) => setNsfwEnabled(event.target.checked)} /><span><strong>启用 NSFW 模式</strong><small>关闭后隐藏相关设置与专用立绘，并从系统提示词中移除对应规则；已有数据会继续保留。</small></span></label></div>
-            <div className="form-section"><h3>剧情规则与文风</h3><p className="form-section-description">设置剧情组织方式、整体文风、叙事视角、氛围、节奏、篇幅和描写偏好。选项生成与主角控制权由系统规则固定。</p><textarea className="game-prompt-textarea" value={game.storyStylePrompt} onChange={(event) => patchGame({ storyStylePrompt: event.target.value })} placeholder="例如：细腻的第三人称叙事；注重场景氛围、人物神态和情绪变化……" /></div>
-            <div className="form-section"><h3>章节切换规则</h3><p className="form-section-description">设置章节结束、过渡和新章节开启时需要遵守的额外规则。内容会在新游戏开始或章节切换时附加到本轮用户指令。</p><textarea className="game-prompt-textarea" value={game.chapterTransitionRules ?? ''} onChange={(event) => patchGame({ chapterTransitionRules: event.target.value })} placeholder="例如：章节结束前收束当前矛盾；新章节应延续既有角色关系和状态……" /><ParameterSlider label="章节开始时选项数" min={4} max={10} step={1} precision={0} value={game.newStoryChoiceCount ?? 4} onChange={(newStoryChoiceCount) => patchGame({ newStoryChoiceCount })} /><div className={`linked-setting-panel ${game.recommendedChapterTurnsEnabled ? '' : 'disabled'}`}><label className="nsfw-mode-toggle"><input type="checkbox" checked={game.recommendedChapterTurnsEnabled ?? false} onChange={(event) => patchGame({ recommendedChapterTurnsEnabled: event.target.checked })} /><span><strong>启用单章节推荐对话数</strong><small>章节对话轮数超过此数值，则会优先推动章节结束</small></span></label><ParameterSlider label="单章节推荐对话数" min={10} max={30} step={1} precision={0} value={game.recommendedChapterTurns ?? 20} disabled={!(game.recommendedChapterTurnsEnabled ?? false)} onChange={(recommendedChapterTurns) => patchGame({ recommendedChapterTurns })} /></div></div>
+          {tab === 'rules' && <section className="game-tab-panel">
+            <div className="form-section"><h3>章节切换规则</h3><p className="form-section-description">设置章节结束、过渡和新章节开启时需要遵守的额外规则。内容会在新游戏开始或章节切换时附加到本轮用户指令。</p><textarea className="game-prompt-textarea" value={game.chapterTransitionRules ?? ''} onChange={(event) => patchGame({ chapterTransitionRules: event.target.value })} placeholder="例如：章节结束前收束当前矛盾；新章节应延续既有角色关系和状态……" /><ParameterSlider label="章节开始时选项数" min={4} max={10} step={1} precision={0} value={game.newStoryChoiceCount ?? 4} onChange={(newStoryChoiceCount) => patchGame({ newStoryChoiceCount })} /><ParameterSlider label="每章节推荐对话轮数（到达此轮数则优先生成结束选项。如不想激活，可将滚动条拖至最左）" min={RECOMMENDED_CHAPTER_TURNS_DISABLED} max={30} step={1} precision={0} value={game.recommendedChapterTurnsEnabled ? Math.min(30, Math.max(10, game.recommendedChapterTurns ?? 20)) : RECOMMENDED_CHAPTER_TURNS_DISABLED} valueLabel={game.recommendedChapterTurnsEnabled ? undefined : '未激活'} onChange={(value) => patchGame(value === RECOMMENDED_CHAPTER_TURNS_DISABLED ? { recommendedChapterTurnsEnabled: false } : { recommendedChapterTurnsEnabled: true, recommendedChapterTurns: value })} /></div>
+            <div className="form-section"><h3>叙事模式切换规则</h3><p className="form-section-description">描述不同叙事模式之间的切换条件，以及不同章节或剧情内容应采用的叙事模式。此规则会始终注入提示词。</p><textarea className="game-prompt-textarea" value={game.narrativeModeRulesPrompt ?? ''} onChange={(event) => patchGame({ narrativeModeRulesPrompt: event.target.value })} placeholder="例如：日常章节使用正常模式；进入亲密情节前通过选项切换至 NSFW 模式……" /></div>
             <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /></div>
+            <div className="form-section"><h3>记忆规则</h3><p className="form-section-description">记忆和角色经历的内容、生成规则可在 RPG 主界面的“记忆”标签下查看。关闭功能不会删除已有内容。</p>
+              {([['chapterMemoryEnabled', '启用章节记忆', '每章结束后整理本章剧情，保留最近章节的摘要。'], ['distantMemoryEnabled', '启用远期记忆', '章节摘要超出保留上限时，将较早章节压缩为长期事实。'], ['characterExperienceEnabled', '启用角色经历', '章节结束后，基于该章章节记忆按出场比例整理角色的重要事件与关系变化。']] as const).map(([key, label, description]) => <label className="setting-toggle" key={key}><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory)[key])} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), [key]: event.target.checked } })} /><span><strong>{label}</strong><small>{description}</small></span></label>)}
+            </div>
+            <div className="form-section narrative-mode-section"><div className="narrative-mode-heading"><div><h3>叙事模式</h3><p className="form-section-description">叙事模式用于区分当前的故事状态，可针对不同状态设计不同的故事生成规则，人物立绘等</p></div><button type="button" className="secondary-button" onClick={addNarrativeMode}><Plus size={15} />新增模式</button></div><div className="narrative-mode-list">{narrativeModes.map((mode, index) => <div className="narrative-mode-row" key={mode.id}><span className="narrative-mode-order">{index + 1}</span><input className="narrative-mode-name-input" aria-label={`叙事模式 ${index + 1} 名称`} value={narrativeModeNameDrafts[mode.id] ?? mode.name} onChange={(event) => setNarrativeModeNameDrafts((current) => ({ ...current, [mode.id]: event.target.value }))} onBlur={(event) => finishNarrativeModeName(mode, event.target.value)} /><CharacterColorControl compact value={mode.color} onChange={(color) => patchNarrativeMode(mode.id, { color })} /><button type="button" className="danger-icon" disabled={narrativeModes.length <= 1} onClick={() => deleteNarrativeMode(mode.id)} title={narrativeModes.length <= 1 ? '至少保留一个叙事模式' : `删除${mode.name}`}><Trash2 size={16} /></button></div>)}</div></div>
+          </section>}
+
+          {tab === 'preferences' && <section className="game-tab-panel">
             <div className="form-section"><h3>故事背景设定</h3><p className="form-section-description">设置世界观、时代、地点、势力、社会规则和故事开始前已经成立的背景事实。</p><textarea className="game-prompt-textarea" value={game.worldSettingPrompt} onChange={(event) => patchGame({ worldSettingPrompt: event.target.value })} placeholder="例如：世界结构、主要地区、阵营关系、特殊规则与故事前提……" /></div>
-            {game.nsfwEnabled && <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；仅书写希望在 NSFW 情节中生效的偏好" /></div>}
+            <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景设定</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；书写希望在相关情节中生效的偏好" /></div>
+            <div className="form-section narrative-style-section"><h3>叙事风格设定</h3><p className="form-section-description">全局设定始终生效；叙事模式设定仅在对应模式下与全局设定共同发送。</p><div className="narrative-style-tabs" role="tablist" aria-label="叙事风格设定范围"><button type="button" role="tab" aria-selected={selectedNarrativeStyleId === 'global'} className={selectedNarrativeStyleId === 'global' ? 'active' : ''} onClick={() => setSelectedNarrativeStyleId('global')}>全局设定</button>{availableModes.map((mode) => <button type="button" role="tab" aria-selected={selectedNarrativeStyleId === mode.id} className={selectedNarrativeStyleId === mode.id ? 'active' : ''} key={mode.id} onClick={() => setSelectedNarrativeStyleId(mode.id)}><span className="narrative-mode-dot" style={{ backgroundColor: mode.color }} />{mode.name}</button>)}</div><textarea className="game-prompt-textarea" value={selectedNarrativeStyleId === 'global' ? game.storyStylePrompt : game.modeStoryStylePrompts?.[selectedNarrativeStyleId] ?? ''} onChange={(event) => selectedNarrativeStyleId === 'global' ? patchGame({ storyStylePrompt: event.target.value }) : patchGame({ modeStoryStylePrompts: { ...game.modeStoryStylePrompts, [selectedNarrativeStyleId]: event.target.value } })} placeholder={selectedNarrativeStyleId === 'global' ? '设置全局剧情组织方式、文风、叙事视角、氛围、节奏、篇幅和描写偏好' : '填写当前叙事模式专用的叙事风格设定，可留空'} /></div>
           </section>}
 
           {tab === 'characters' && <section className="character-settings-layout">
@@ -352,34 +423,42 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               {game.characters.map((character) => <button className={character.id === selectedCharacter?.id ? 'active' : ''} key={character.id} onClick={() => setSelectedCharacterId(character.id)}><span className="character-color-dot" style={{ background: character.color }} /><span><strong>{character.name || '未命名'}</strong><small>{character.role === 'player' ? '主角' : 'NPC'}</small></span></button>)}
             </aside>
             {selectedCharacter && <div className="character-editor">
-              <div className="character-editor-head"><div><span className="eyebrow">{selectedCharacter.role === 'player' ? 'PLAYER CHARACTER' : 'NON-PLAYER CHARACTER'}</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setExportNsfw(game.nsfwEnabled); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
-              <div className="form-row"><label>姓名<input value={selectedCharacter.name} onChange={(event) => patchCharacter(selectedCharacter.id, { name: event.target.value })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
-              <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
-              <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
-              {Boolean(game.statusRulesPrompt?.trim()) && <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>}
-              {game.nsfwEnabled && <label><span className="nsfw-mark">❤</span> NSFW设定<span className="field-description">描述人物NSFW相关的设定，如H经验、XP、特殊敏感带、NSFW场景下特殊反应等</span><textarea className="character-description" value={selectedCharacter.nsfwDescription ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { nsfwDescription: event.target.value })} placeholder="可留空；仅在NSFW内容中使用" /></label>}
-              <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{visiblePortraits.length} 张</span></div><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label></div>
-              {portraitError && <div className="inline-error">{portraitError}</div>}
-              <div className="portrait-settings-list">{visiblePortraits.map((portrait) => {
-                const tags = portrait.tags?.length ? portrait.tags : [portrait.expression].filter(Boolean)
-                const groups: PortraitGroup[] = portrait.groups?.length ? portrait.groups : ['normal']
-                const tagDraftKey = `${selectedCharacter.id}:${portrait.id}`
-                const tagDraft = portraitTagDrafts[tagDraftKey] ?? formatPortraitTags(tags)
-                return <div className="portrait-settings-row" key={portrait.id}>
-                  <img src={portraitSource(portrait.uri)} alt="" />
-                  <div className="portrait-metadata"><label>表情标签<input value={tagDraft} onChange={(event) => editPortraitTags(selectedCharacter, portrait, event.target.value)} onBlur={(event) => finishPortraitTagEdit(selectedCharacter, portrait, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="严肃，担忧" /></label>{game.nsfwEnabled && <div className="portrait-group-options"><label><input type="checkbox" checked={groups.includes('normal')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'normal', event.target.checked)} />常规</label><label><input type="checkbox" checked={groups.includes('nsfw')} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, 'nsfw', event.target.checked)} /><span className="nsfw-mark">❤</span> NSFW</label></div>}<div className="portrait-default-actions"><button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.normal === portrait.id || (!selectedCharacter.defaultPortraitIds?.normal && selectedCharacter.defaultPortraitId === portrait.id) ? 'active' : ''}`} disabled={!groups.includes('normal')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'normal')}><Star size={14} />{game.nsfwEnabled ? '常规默认' : '设为默认'}</button>{game.nsfwEnabled && <button className={`default-portrait-button ${selectedCharacter.defaultPortraitIds?.nsfw === portrait.id ? 'active' : ''}`} disabled={!groups.includes('nsfw')} onClick={() => setGroupDefault(selectedCharacter, portrait, 'nsfw')}><Star size={14} /><span className="nsfw-mark">❤</span> NSFW默认</button>}</div></div>
-                  <button className="danger-icon" onClick={() => void removePortrait(selectedCharacter, portrait.id)} title="删除立绘"><Trash2 size={16} /></button>
-                </div>
-              })}</div>
+              <div className="character-common-settings">
+                <div className="character-editor-head"><div><span className="eyebrow">通用设定</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
+                <div className="form-row"><label>姓名<input value={selectedCharacter.name} onChange={(event) => patchCharacter(selectedCharacter.id, { name: event.target.value })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
+                <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
+                <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
+                {Boolean(game.statusRulesPrompt?.trim()) && <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>}
+              </div>
+              <section className="character-mode-settings">
+                <div className="character-mode-heading"><div><span className="eyebrow">模式个性化设定</span><h3>{selectedCharacterMode?.name ?? '叙事模式'}</h3></div></div>
+                <div className="character-mode-tabs" role="tablist" aria-label="人物叙事模式">{availableModes.map((mode) => <button type="button" role="tab" aria-selected={mode.id === selectedModeId} className={mode.id === selectedModeId ? 'active' : ''} key={mode.id} onClick={() => setSelectedCharacterModeId(mode.id)}><span className="narrative-mode-dot" style={{ backgroundColor: mode.color }} />{mode.name}</button>)}</div>
+                <label>特殊设定<span className="field-description">仅在“{selectedCharacterMode?.name}”叙事模式下生效</span><textarea className="character-description" value={selectedCharacter.modeDescriptions?.[selectedModeId] ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { modeDescriptions: { ...selectedCharacter.modeDescriptions, [selectedModeId]: event.target.value } })} placeholder="可留空；填写当前叙事模式专用的人物设定" /></label>
+                <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{selectedCharacter.portraits.length} 张</span></div><div className="portrait-toolbar"><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label><button type="button" className="secondary-button" onClick={() => setPortraitManagerOpen(true)}><Trash2 size={15} />删除立绘</button></div></div>
+                {portraitError && <div className="inline-error">{portraitError}</div>}
+                {!sortedPortraits.length ? <div className="portrait-settings-empty">尚未添加立绘</div> : <div className="portrait-settings-list">{sortedPortraits.map((portrait) => {
+                  const tags = portrait.tags?.length ? portrait.tags : [portrait.expression].filter(Boolean)
+                  const groups: PortraitGroup[] = portrait.groups ?? [defaultModeId]
+                  const active = groups.includes(selectedModeId)
+                  const isDefault = selectedCharacter.defaultPortraitIds?.[selectedModeId] === portrait.id || (selectedModeId === defaultModeId && !selectedCharacter.defaultPortraitIds?.[selectedModeId] && selectedCharacter.defaultPortraitId === portrait.id)
+                  const tagDraftKey = `${selectedCharacter.id}:${portrait.id}`
+                  const tagDraft = portraitTagDrafts[tagDraftKey] ?? formatPortraitTags(tags)
+                  return <div className={`portrait-settings-row ${isDefault ? 'default' : active ? 'active' : 'inactive'}`} key={portrait.id}>
+                    <img src={portraitSource(portrait.uri)} alt="" />
+                    <div className="portrait-metadata"><label>表情标签<input value={tagDraft} onChange={(event) => editPortraitTags(selectedCharacter, portrait, event.target.value)} onBlur={(event) => finishPortraitTagEdit(selectedCharacter, portrait, event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="严肃，担忧" /></label><div className="portrait-mode-actions"><label className="portrait-active-toggle"><input type="checkbox" checked={active} onChange={(event) => togglePortraitGroup(selectedCharacter, portrait, selectedModeId, event.target.checked)} />在此模式激活</label><button type="button" className={`default-portrait-button ${isDefault ? 'active' : ''}`} onClick={() => setGroupDefault(selectedCharacter, portrait, selectedModeId)}><Star size={14} />{isDefault ? '默认立绘' : '设为默认'}</button></div></div>
+                  </div>
+                })}</div>}
+              </section>
             </div>}
           </section>}
         </div>
-        <div className="modal-footer"><span>设置仅对本RPG生效</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setPromptPreviewOpen(true)}><Eye size={16} />查看完整提示词</button><button className="primary-button" onClick={closeDialog}>完成</button></div></div>
+        <div className="modal-footer"><span>设置仅对本RPG生效</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setPromptPreviewOpen(true)}><Eye size={16} />预览系统提示词</button><button className="primary-button" onClick={closeDialog}>完成</button></div></div>
       </section>
-      {promptPreviewOpen && <div className="prompt-preview-layer" role="dialog" aria-modal="true" aria-label="完整提示词"><button className="backdrop" onClick={() => setPromptPreviewOpen(false)} aria-label="关闭完整提示词" /><section className="modal prompt-preview-modal"><div className="modal-head"><div><span className="eyebrow">COMPILED SYSTEM PROMPT</span><h2>完整提示词</h2></div><button className="icon-button" onClick={() => setPromptPreviewOpen(false)} title="关闭"><X size={20} /></button></div><pre>{fullSystemPrompt}</pre></section></div>}
+      {promptPreviewOpen && <div className="prompt-preview-layer" role="dialog" aria-modal="true" aria-label="预览系统提示词"><button className="backdrop" onClick={() => setPromptPreviewOpen(false)} aria-label="关闭系统提示词预览" /><section className="modal prompt-preview-modal"><div className="modal-head"><div><span className="eyebrow">COMPILED SYSTEM PROMPT</span><h2>预览系统提示词</h2><p className="prompt-preview-note">提示词还包含部分动态生成内容，需查看完整上下文，请使用RPG页面的debug功能。</p></div><button className="icon-button" onClick={() => setPromptPreviewOpen(false)} title="关闭"><X size={20} /></button></div><pre>{fullSystemPrompt}</pre></section></div>}
       {cropTarget && <PortraitCropDialog file={cropTarget.file} onCancel={() => setCropTarget(null)} onConfirm={(file) => addPortrait(cropTarget.characterId, file)} />}
+      {portraitManagerOpen && selectedCharacter && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="删除立绘"><button className="backdrop" onClick={() => setPortraitManagerOpen(false)} aria-label="关闭立绘管理" /><section className="modal role-dialog portrait-manager-dialog"><div className="modal-head"><div><span className="eyebrow">PORTRAIT MANAGER</span><h2>删除立绘</h2></div><button className="icon-button" onClick={() => setPortraitManagerOpen(false)} title="关闭"><X size={19} /></button></div><div className="role-dialog-content portrait-manager-list">{selectedCharacter.portraits.length ? selectedCharacter.portraits.map((portrait) => { const appliedModes = availableModes.filter((mode) => (portrait.groups ?? [defaultModeId]).includes(mode.id)); return <div className="portrait-manager-row" key={portrait.id}><img src={portraitSource(portrait.uri)} alt="" /><div><strong>{portrait.tags?.join('、') || portrait.expression || '未命名立绘'}</strong><span>{appliedModes.length ? `应用于：${appliedModes.map((mode) => mode.name).join('、')}` : '未应用于任何叙事模式'}</span></div><button type="button" className="danger-icon" onClick={() => void removePortrait(selectedCharacter, portrait.id)} title="删除立绘"><Trash2 size={16} /></button></div> }) : <div className="portrait-settings-empty">没有可删除的立绘</div>}</div><div className="modal-footer"><span>删除操作无法恢复</span><button className="primary-button" onClick={() => setPortraitManagerOpen(false)}>完成</button></div></section></div>}
       {addCharacterOpen && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="添加NPC"><button className="backdrop" onClick={() => !roleWorking && setAddCharacterOpen(false)} aria-label="取消添加NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">ADD CHARACTER</span><h2>添加 NPC</h2></div><button className="icon-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><div className="role-mode-tabs"><button className={addCharacterMode === 'new' ? 'active' : ''} onClick={() => setAddCharacterMode('new')}>新建</button><button className={addCharacterMode === 'clone' ? 'active' : ''} onClick={() => setAddCharacterMode('clone')}>克隆</button><button className={addCharacterMode === 'import' ? 'active' : ''} onClick={() => setAddCharacterMode('import')}>导入</button></div>{addCharacterMode === 'new' && <p className="role-mode-description">建立一个空白 NPC，之后手工填写人物设定并添加立绘。</p>}{addCharacterMode === 'clone' && <><label>来源 RPG<select value={cloneGameId} onChange={(event) => { const nextGame = games.find((item) => item.id === event.target.value); setCloneGameId(event.target.value); setCloneCharacterId(nextGame?.characters.find((character) => character.role === 'npc')?.id ?? '') }}>{games.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label>来源 NPC<select value={cloneCharacterId} onChange={(event) => setCloneCharacterId(event.target.value)}><option value="">请选择 NPC</option>{cloneCandidates.map((character) => <option value={character.id} key={character.id}>{character.name || '未命名NPC'}</option>)}</select></label><p className="role-mode-description">完整复制人物设定、状态栏、颜色、NSFW 信息和全部立绘，并生成独立的新 NPC。</p></>}{addCharacterMode === 'import' && <><div className="system-file-picker"><span>角色包</span><label className="secondary-button"><FileUp size={16} />{pickedRoleFile?.name ?? '选择文件'}<input type="file" accept=".role.rpgbox,.rpgbox,application/zip,application/octet-stream" hidden onChange={(event) => { setPickedRoleFile(event.target.files?.[0] ?? null); setRoleImportMode(null); setRoleNotice(''); event.target.value = '' }} /></label>{pickedRoleFile && <button type="button" className="text-button" onClick={() => { setPickedRoleFile(null); setRoleImportMode(null); setRoleNotice('') }}>取消选择</button>}</div><p className="directory-note">可从 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>、下载目录或其他位置选择 `.role.rpgbox` 文件。</p>{roleImportMode === null && roleNotice === '角色已存在，请选择处理方式：' && <div className="role-import-options"><p>角色已存在，请选择处理方式：</p><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('new')} />新建角色</label><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('replace')} />替换原有角色</label><label><input type="radio" name="role-import-mode" checked={false} onChange={() => setRoleImportMode('portraits')} />更新立绘</label></div>}</>}{roleNotice && roleImportMode !== null && <div className="role-import-selection">{roleNotice}</div>}</div><div className="modal-footer"><span>导入或克隆后可继续编辑</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setAddCharacterOpen(false)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmAddCharacter()} disabled={roleWorking}>{roleWorking ? '处理中' : '确认添加'}</button></div></div></section></div>}
-      {exportCharacter && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="导出NPC"><button className="backdrop" onClick={() => !roleWorking && setExportCharacter(null)} aria-label="取消导出NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT CHARACTER</span><h2>导出“{exportCharacter.name || '未命名NPC'}”</h2></div><button className="icon-button" onClick={() => setExportCharacter(null)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><p className="role-mode-description">基础设定、状态栏、颜色、常规立绘及表情标签始终会导出。</p><label className="nsfw-mode-toggle"><input type="checkbox" checked={exportNsfw} onChange={(event) => setExportNsfw(event.target.checked)} /><span><strong><span className="nsfw-mark">❤</span> 包含 NSFW 信息</strong><small>导出 NSFW 设定、NSFW 分组与专用立绘；关闭时这些内容不会写入角色包。</small></span></label><p className="directory-note">文件将保存到 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>，扩展名为 `.role.rpgbox`。</p>{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>角色包不包含 RPG 剧情或 AI 配置</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportCharacter(null)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmExportCharacter()} disabled={roleWorking}>{roleWorking ? '导出中' : '确认导出'}</button></div></div></section></div>}
+      {exportCharacter && <div className="modal-layer role-dialog-layer" role="dialog" aria-modal="true" aria-label="导出NPC"><button className="backdrop" onClick={() => !roleWorking && setExportCharacter(null)} aria-label="取消导出NPC" /><section className="modal role-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT CHARACTER</span><h2>导出“{exportCharacter.name || '未命名NPC'}”</h2></div><button className="icon-button" onClick={() => setExportCharacter(null)} disabled={roleWorking} title="关闭"><X size={19} /></button></div><div className="role-dialog-content"><p className="role-mode-description">人物通用设定、各模式特殊设定、状态栏、颜色及全部立绘都会完整导出。</p><p className="directory-note">文件将保存到 <strong>{ROLE_PACKAGE_DIRECTORY_LABEL}</strong>，扩展名为 `.role.rpgbox`。</p>{roleNotice && <div className="inline-error">{roleNotice}</div>}</div><div className="modal-footer"><span>角色包不包含 RPG 剧情或 AI 配置</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportCharacter(null)} disabled={roleWorking}>取消</button><button className="primary-button" onClick={() => void confirmExportCharacter()} disabled={roleWorking}>{roleWorking ? '导出中' : '确认导出'}</button></div></div></section></div>}
     </div>
   )
 }
@@ -392,11 +471,11 @@ function portraitTagsKey(tags: string[]): string {
   return Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))).sort().join('\u0001')
 }
 
-function ParameterSlider({ label, value, min, max, step, precision = 2, disabled = false, onChange }: { label: string; value: number; min: number; max: number; step: number; precision?: number; disabled?: boolean; onChange: (value: number) => void }) {
-  return <label className={`parameter-slider ${disabled ? 'disabled' : ''}`}><span><span>{label}</span><strong>{value.toFixed(precision)}</strong></span><input type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></label>
+function ParameterSlider({ label, value, valueLabel, min, max, step, precision = 2, disabled = false, onChange }: { label: string; value: number; valueLabel?: string; min: number; max: number; step: number; precision?: number; disabled?: boolean; onChange: (value: number) => void }) {
+  return <label className={`parameter-slider ${disabled ? 'disabled' : ''}`}><span><span>{label}</span><strong>{valueLabel ?? value.toFixed(precision)}</strong></span><input type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></label>
 }
 
-function CharacterColorControl({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function CharacterColorControl({ value, compact = false, onChange }: { value: string; compact?: boolean; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false)
   const hsv = hexToHsv(value)
   const hueColor = hsvToHex({ h: hsv.h, s: 100, v: 100 })
@@ -406,10 +485,10 @@ function CharacterColorControl({ value, onChange }: { value: string; onChange: (
     onChange(hsvToHex({ ...hsv, ...patch }))
   }
 
-  return <span className="character-color-control">
+  return <span className={`character-color-control ${compact ? 'compact' : ''}`}>
     <span className="color-input-row">
       <button type="button" className="color-swatch-button" style={{ backgroundColor: normalizeHexColor(value) }} onClick={() => setOpen((current) => !current)} aria-label="自定义主体颜色" aria-expanded={open} />
-      <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={() => onChange(normalizeHexColor(value))} aria-label="主体颜色十六进制值" />
+      {!compact && <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={() => onChange(normalizeHexColor(value))} aria-label="主体颜色十六进制值" />}
     </span>
     {open && <span className="character-hsv-editor">
       <ColorChannel label="色相" value={hsv.h} max={359} background="linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" onChange={(h) => patchHsv({ h })} />

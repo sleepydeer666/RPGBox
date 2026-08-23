@@ -26,12 +26,13 @@ export function resolveCharacterExpression(character: ExpressionProfile | undefi
   portrait?: CharacterPortrait
   displayExpression: string
 } {
+  const requestedExpression = firstRequestedState(requested)
   if (!character?.portraits?.length) {
-    return { displayExpression: localizeExpression(firstRequestedState(requested)) }
+    return { displayExpression: requestedExpression ? localizeExpression(requestedExpression) : '' }
   }
 
-  const candidates = character.portraits.filter((portrait) => (portrait.groups?.length ? portrait.groups : ['normal']).includes(group))
-  if (!candidates.length) return { displayExpression: localizeExpression(firstRequestedState(requested)) }
+  const candidates = character.portraits.filter((portrait) => (portrait.groups ?? ['normal']).includes(group))
+  if (!candidates.length) return { displayExpression: requestedExpression ? localizeExpression(requestedExpression) : '' }
 
   const requestedTags = splitTags(requested)
   const matchedState = requestedTags.flatMap((requestedTag) => candidates.flatMap((portrait) => {
@@ -39,10 +40,13 @@ export function resolveCharacterExpression(character: ExpressionProfile | undefi
     return configuredTag ? [{ portrait, configuredTag }] : []
   }))[0]
   const defaultId = character.defaultPortraitIds?.[group] ?? (group === 'normal' ? character.defaultPortraitId : undefined)
-  const portrait = matchedState?.portrait ?? candidates.find((item) => item.id === defaultId) ?? candidates[0]
+  const portrait = matchedState?.portrait ?? candidates.find((item) => item.id === defaultId)
+  if (!portrait) return { displayExpression: requestedExpression ? localizeExpression(requestedExpression) : '' }
   return {
     portrait,
-    displayExpression: matchedState?.configuredTag ?? portraitTags(portrait)[0] ?? localizeExpression(portrait.expression),
+    displayExpression: requestedExpression
+      ? matchedState?.configuredTag ?? portraitTags(portrait)[0] ?? localizeExpression(portrait.expression)
+      : '',
   }
 }
 

@@ -2,6 +2,7 @@ import { createBlankGame } from '../game'
 import type { GameSession, ProviderProfile } from '../types'
 import { savePortraitFile } from './portraits'
 import { importRpgboxSections, parseRpgboxXml } from './rpgPackage'
+import { assetUrl } from '../platform/assetUrl'
 
 export interface BundledRpgPackage {
   key: string
@@ -77,7 +78,7 @@ export async function importBundledRpg(
 
 async function loadManifest(): Promise<BundledRpgManifestEntry[]> {
   try {
-    const response = await fetch('/bundled-rpg/manifest.json', { cache: 'no-store' })
+    const response = await fetch(assetUrl('bundled-rpg/manifest.json'), { cache: 'no-store' })
     if (!response.ok) return []
     return ((await response.json()) as BundledRpgManifest).packages ?? []
   } catch {

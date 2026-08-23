@@ -11,14 +11,10 @@ vi.mock('@capacitor/preferences', () => ({
   Preferences: preferenceMocks,
 }))
 
-describe('RPG NSFW setting migration', () => {
+describe('RPG storage migration', () => {
   beforeEach(() => {
     preferenceMocks.get.mockReset()
     preferenceMocks.set.mockReset()
-  })
-
-  it('keeps newly created RPGs disabled by default', () => {
-    expect(createBlankGame(1).nsfwEnabled).toBe(false)
   })
 
   it('keeps an empty library empty instead of restoring the sample RPG', async () => {
@@ -31,30 +27,19 @@ describe('RPG NSFW setting migration', () => {
     expect(loaded.activeGameId).toBe('')
   })
 
-  it('keeps legacy RPG behavior enabled when the saved flag is absent', async () => {
-    const legacy = createBlankGame(1) as Partial<ReturnType<typeof createBlankGame>>
-    delete legacy.nsfwEnabled
+  it('fills defaults for older saved RPGs', async () => {
+    const legacy = createBlankGame(1)
     preferenceMocks.get.mockResolvedValue({
       value: JSON.stringify({ games: [legacy], activeGameId: legacy.id }),
     })
 
     const loaded = await loadState()
-    expect(loaded.games?.[0].nsfwEnabled).toBe(true)
     expect(loaded.games?.[0].newStoryChoiceCount).toBe(4)
     expect(loaded.games?.[0].chapterTransitionRules).toBe('')
     expect(loaded.games?.[0].recommendedChapterTurnsEnabled).toBe(false)
     expect(loaded.games?.[0].recommendedChapterTurns).toBe(20)
+    expect(loaded.games?.[0].aiSettings.useCompatiblePromptFormat).toBe(true)
     expect(loaded.games?.[0].aiSettings.warnOnProtocolAnomaly).toBe(false)
-  })
-
-  it('preserves an explicitly disabled saved RPG', async () => {
-    const game = createBlankGame(1)
-    preferenceMocks.get.mockResolvedValue({
-      value: JSON.stringify({ games: [game], activeGameId: game.id }),
-    })
-
-    const loaded = await loadState()
-    expect(loaded.games?.[0].nsfwEnabled).toBe(false)
   })
 
   it('defaults the format warning to disabled for older saved RPGs', async () => {
@@ -66,6 +51,17 @@ describe('RPG NSFW setting migration', () => {
 
     const loaded = await loadState()
     expect(loaded.games?.[0].aiSettings.warnOnProtocolAnomaly).toBe(false)
+  })
+
+  it('defaults the compatible prompt format to disabled for older saved RPGs', async () => {
+    const game = createBlankGame(1)
+    delete (game.aiSettings as Partial<typeof game.aiSettings>).useCompatiblePromptFormat
+    preferenceMocks.get.mockResolvedValue({
+      value: JSON.stringify({ games: [game], activeGameId: game.id }),
+    })
+
+    const loaded = await loadState()
+    expect(loaded.games?.[0].aiSettings.useCompatiblePromptFormat).toBe(true)
   })
 
   it('normalizes invalid and out-of-range new-story choice counts', async () => {

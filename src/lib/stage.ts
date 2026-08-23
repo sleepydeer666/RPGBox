@@ -7,11 +7,11 @@ export interface StageActor {
   position: 0 | 1
   /** Monotonic order used to evict the earliest actor. */
   enteredAt: number
+  lastSpokenAt?: number
 }
 
 export interface StageTurn {
   segments: StorySegment[]
-  sceneChanged?: boolean
   presentCharacterIds?: string[]
 }
 
@@ -25,39 +25,41 @@ export function collectRecentActors(
   const actors: StageActor[] = []
   let enteredAt = 0
   for (const turn of turns) {
-    if (turn.sceneChanged) actors.length = 0
-    const present = turn.presentCharacterIds
-    if (present) {
+    let turnPresent = turn.presentCharacterIds
+    if (turnPresent) {
       const speakingIds = new Set(turn.segments.filter((segment) => segment.type === 'dialogue').map((segment) => findCharacter(segment, characters)?.id).filter(Boolean))
       for (let index = actors.length - 1; index >= 0; index -= 1) {
-        if (!present.includes(actors[index].character.id) && !speakingIds.has(actors[index].character.id)) actors.splice(index, 1)
+        if (!turnPresent.includes(actors[index].character.id) && !speakingIds.has(actors[index].character.id)) actors.splice(index, 1)
       }
     }
     for (const segment of turn.segments) {
+      const present = segment.presentCharacterIds ?? turnPresent
+      if (present) turnPresent = present
       if (segment.type !== 'dialogue') continue
       const character = findCharacter(segment, characters)
       if (!character || !hasPortraitForMode(character, mode)) continue
       const existingIndex = actors.findIndex((actor) => actor.character.id === character.id)
       if (existingIndex >= 0) {
-        actors[existingIndex] = { ...actors[existingIndex], character, expression: segment.expression ?? '' }
+        actors[existingIndex] = { ...actors[existingIndex], character, expression: segment.expression ?? '', lastSpokenAt: enteredAt++ }
       } else {
         const slot = actors.length < limit ? actors.length : oldestActorIndex(actors)
         const position = actors.length < limit ? availablePosition(actors) : actors[slot].position
-        const actor = { character, expression: segment.expression ?? '', position, enteredAt: enteredAt++ }
+        const spokenAt = enteredAt++
+        const actor = { character, expression: segment.expression ?? '', position, enteredAt: spokenAt, lastSpokenAt: spokenAt }
         if (actors.length < limit) actors.push(actor)
         else actors[slot] = actor
       }
     }
-    for (const characterId of includePresentCharacters ? present ?? [] : []) {
+    for (const characterId of includePresentCharacters ? turnPresent ?? [] : []) {
       if (actors.length >= limit) break
       if (actors.some((actor) => actor.character.id === characterId)) continue
       const character = characters.find((item) => item.id === characterId)
       if (!character || !hasPortraitForMode(character, mode)) continue
-      actors.push({ character, expression: '', position: availablePosition(actors), enteredAt: enteredAt++ })
+      actors.push({ character, expression: '', position: availablePosition(actors), enteredAt: enteredAt++, lastSpokenAt: -1 })
     }
-    if (present) {
+    if (turnPresent) {
       for (let index = actors.length - 1; index >= 0; index -= 1) {
-        if (!present.includes(actors[index].character.id)) actors.splice(index, 1)
+        if (!turnPresent.includes(actors[index].character.id)) actors.splice(index, 1)
       }
     }
   }
@@ -87,6 +89,7 @@ export function includeActiveSpeaker(
     expression: speaker.expression,
     position,
     enteredAt: Math.max(-1, ...next.map((actor) => actor.enteredAt)) + 1,
+    lastSpokenAt: Math.max(-1, ...next.map((actor) => actor.lastSpokenAt ?? -1)) + 1,
   }
   if (next.length < limit) next.push(actor)
   else next[slot] = actor
@@ -130,7 +133,7 @@ function availablePosition(actors: StageActor[]): 0 | 1 {
 
 function hasPortraitForMode(character: CharacterProfile, mode: PortraitGroup): boolean {
   return character.portraits.some((portrait) =>
-    (portrait.groups?.length ? portrait.groups : ['normal']).includes(mode),
+    (portrait.groups ?? ['normal']).includes(mode),
   )
 }
 

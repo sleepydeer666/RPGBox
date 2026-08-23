@@ -4,12 +4,17 @@ export const DEFAULT_RECENT_CHAPTER_LIMIT = 5
 
 export function normalizeMemoryState(memory: Partial<MemoryState> | undefined): MemoryState {
   return {
+    chapterMemoryEnabled: memory?.chapterMemoryEnabled ?? true,
+    distantMemoryEnabled: memory?.distantMemoryEnabled ?? true,
+    characterExperienceEnabled: memory?.characterExperienceEnabled ?? true,
     currentChapterSummary: memory?.currentChapterSummary ?? memory?.chapterSummary ?? '',
     recentChapters: memory?.recentChapters ?? [],
     recentChapterLimit: clampRecentChapterLimit(memory?.recentChapterLimit),
     historicalSummary: memory?.historicalSummary ?? '',
     chapterSummaryInstructions: memory?.chapterSummaryInstructions ?? '',
     distantSummaryInstructions: memory?.distantSummaryInstructions ?? '',
+    characterExperienceInstructions: memory?.characterExperienceInstructions ?? '',
+    characterExperiences: memory?.characterExperiences ?? {},
   }
 }
 
@@ -34,7 +39,11 @@ export function formatRecentChapterMemories(memory: MemoryState): string {
   const current = currentChapterSummary(memory).trim()
     ? `### 当前章节（进行中）\n${currentChapterSummary(memory).trim()}`
     : ''
-  return [completed, current].filter(Boolean).join('\n\n') || '暂无主记忆。'
+  return [completed, current].filter(Boolean).join('\n\n')
+}
+
+export function characterExperience(memory: MemoryState, characterId: string): string {
+  return memory.characterExperiences?.[characterId]?.trim() ?? ''
 }
 
 export function partitionRecentChapterMemories(chapters: ChapterMemory[], limit: number | undefined) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAdditionalMemorySummaryInstructions, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './memorySummary'
+import { buildChapterSummaryDebugRequest, buildDistantSummaryDebugRequest, CHAPTER_SUMMARY_SYSTEM_PROMPT, DISTANT_SUMMARY_SYSTEM_PROMPT, formatAdditionalMemorySummaryInstructions, formatCharacterExperienceSummaryTargets, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './memorySummary'
 
 describe('memory summary validation', () => {
   it('accepts concise Chinese memory summaries', () => {
@@ -27,5 +27,31 @@ describe('memory summary validation', () => {
     expect(formatAdditionalMemorySummaryInstructions('  优先保留人物关系变化  ')).toContain('优先保留人物关系变化')
     expect(formatAdditionalMemorySummaryInstructions('优先保留人物关系变化')).toContain('不能覆盖系统提示词')
     expect(formatAdditionalMemorySummaryInstructions('   ')).toBe('')
+  })
+
+  it('requires named participants without restoring fixed character profiles', () => {
+    expect(CHAPTER_SUMMARY_SYSTEM_PROMPT).toContain('必须明确写出核心事件、重要选择和关系变化涉及的每位人物姓名')
+    expect(CHAPTER_SUMMARY_SYSTEM_PROMPT).toContain('不得只用“两人”“众人”“几名角色”')
+    expect(DISTANT_SUMMARY_SYSTEM_PROMPT).toContain('重大事件、持久关系和心态变化必须明确写出涉及的人物姓名')
+    expect(DISTANT_SUMMARY_SYSTEM_PROMPT).toContain('不写固定人物设定')
+  })
+
+  it('adds experience targets and player aliases to chapter summary requirements', () => {
+    const text = formatCharacterExperienceSummaryTargets([{ name: '居眠鹿', role: 'player' }, { name: '维拉', role: 'npc' }])
+    expect(text).toContain('- 居眠鹿（用户扮演角色')
+    expect(text).toContain('“你”“我”“主角”“司令官”')
+    expect(text).toContain('- 维拉')
+  })
+
+  it('builds debug requests from requirements without including summary source material', () => {
+    const chapter = buildChapterSummaryDebugRequest('雨夜归途', '保留关系变化')
+    const distant = buildDistantSummaryDebugRequest('保留长期承诺')
+    expect(chapter).toContain('章节名称：雨夜归途')
+    expect(chapter).toContain('保留关系变化')
+    expect(chapter).not.toContain('本章剧情：')
+    expect(chapter).not.toContain('已有的本章摘要')
+    expect(distant).toContain('保留长期承诺')
+    expect(distant).not.toContain('既有远期记忆：')
+    expect(distant).not.toContain('移出的旧章节：')
   })
 })

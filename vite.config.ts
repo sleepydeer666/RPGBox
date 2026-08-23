@@ -19,12 +19,12 @@ function bundledDefaultPrompt() {
   }
 }
 
-function bundledRpgAssets() {
+function bundledRpgAssets(includePackages: boolean) {
   return {
     name: 'bundle-extracted-rpg-assets',
     async generateBundle() {
       const sourceDirectory = resolve(process.cwd(), 'src/assets/default-rpg')
-      const fileNames = existsSync(sourceDirectory)
+      const fileNames = includePackages && existsSync(sourceDirectory)
         ? readdirSync(sourceDirectory).filter((fileName) => fileName.toLowerCase().endsWith('.rpgbox')).sort()
         : []
       const packages = [] as Array<{
@@ -49,14 +49,14 @@ function bundledRpgAssets() {
           if (entry.dir || !entry.name.startsWith('portraits/') || entry.name.includes('..')) continue
           const assetFileName = `${packageDirectory}/${entry.name}`
           this.emitFile({ type: 'asset', fileName: assetFileName, source: await entry.async('uint8array') })
-          portraits[entry.name] = `/${assetFileName}`
+          portraits[entry.name] = `./${assetFileName}`
         }
         packages.push({
           key: `file:${fileName}`,
           fileName,
           title: decodeXmlAttribute(xmlText.match(/<rpgbox\b[^>]*\btitle="([^"]*)"/u)?.[1] ?? fileName.replace(/\.rpgbox$/iu, '')),
           hasNsfw: /<section\s+name="nsfw"\s/u.test(xmlText),
-          xmlUrl: `/${xmlFileName}`,
+          xmlUrl: `./${xmlFileName}`,
           portraits,
         })
       }
@@ -79,8 +79,9 @@ function decodeXmlAttribute(value: string): string {
     .replace(/&amp;/gu, '&')
 }
 
-export default defineConfig({
-  plugins: [react(), bundledDefaultPrompt(), bundledRpgAssets()],
+export default defineConfig(({ mode }) => ({
+  base: './',
+  plugins: [react(), bundledDefaultPrompt(), bundledRpgAssets(mode !== 'web')],
   build: {
     rollupOptions: {
       input: {
@@ -93,4 +94,4 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
   },
-})
+}))

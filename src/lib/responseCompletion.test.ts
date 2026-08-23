@@ -35,9 +35,9 @@ describe('inspectLatestResponseCompletion', () => {
     })
   })
 
-  it('uses all present NPC status lines as the final marker when status rules are enabled', () => {
+  it('does not require status lines even when status rules are enabled', () => {
     const game = gameWithResponse('[状态] 地点：大厅；时间：早晨；章节：序章；场景：延续；在场人物：维纳斯、露娜\n[旁白] 门打开了。\n[选项A] 一\n[选项B] 二\n[选项C] 三\n[选项D] 四\n[选项E] 五\n[选项F] 六\n[维纳斯]状态：平静', '记录情绪')
-    expect(inspectLatestResponseCompletion(game)).toMatchObject({ complete: false, missingStatusCharacterIds: ['luna'] })
+    expect(inspectLatestResponseCompletion(game)).toMatchObject({ complete: true, missingStatusCharacterIds: [] })
 
     game.messages[1].content += '\n[露娜]状态：紧张'
     expect(inspectLatestResponseCompletion(game)).toMatchObject({ complete: true, statusesComplete: true })
@@ -64,19 +64,39 @@ describe('inspectLatestResponseCompletion', () => {
 
   it('builds a targeted continuation instruction for the missing sections', () => {
     const choicesMissing = inspectLatestResponseCompletion(gameWithResponse('[旁白] 正文。'))
-    expect(responseContinuationInstruction(choicesMissing)).toBe('按要求补全选项')
+    expect(responseContinuationInstruction(choicesMissing)).toContain('在剧情部分被截断')
+    expect(responseContinuationInstruction(choicesMissing)).toContain('完整的A-D选项')
 
     const statusesMissing = inspectLatestResponseCompletion(gameWithResponse(
       '[状态] 地点：大厅；时间：早晨；章节：序章；场景：延续；在场人物：维纳斯\n[旁白] 正文。\n[选项A] 一\n[选项B] 二\n[选项C] 三\n[选项D] 四',
       '记录情绪',
     ))
-    expect(responseContinuationInstruction(statusesMissing)).toBe('按要求输出状态栏更新')
+    expect(responseContinuationInstruction(statusesMissing)).toBe('继续输出完整')
 
     const bothMissing = inspectLatestResponseCompletion(gameWithResponse(
       '[状态] 地点：大厅；时间：早晨；章节：序章；场景：延续；在场人物：维纳斯\n[旁白] 正文。',
       '记录情绪',
     ))
-    expect(responseContinuationInstruction(bothMissing)).toBe('按要求补全选项，并按要求输出状态栏更新')
+    expect(responseContinuationInstruction(bothMissing)).toContain('在剧情部分被截断')
+  })
+
+  it('requests only missing choices after the response has entered the choice section', () => {
+    const completion = inspectLatestResponseCompletion(gameWithResponse(
+      '[旁白] 正文。\n[选项A] 前进\n[选项B] 留在原地\n[选项C] 调查',
+    ))
+
+    expect(completion).toMatchObject({ choiceSectionStarted: true, missingChoiceIds: ['D'] })
+    expect(responseContinuationInstruction(completion)).toContain('在选项部分被截断')
+    expect(responseContinuationInstruction(completion)).toContain('缺失的选项（D）')
+    expect(responseContinuationInstruction(completion)).toContain('不要重复已完整输出的剧情或选项')
+  })
+
+  it('recognizes a truncated first option as the start of the choice section', () => {
+    const completion = inspectLatestResponseCompletion(gameWithResponse('[旁白] 正文。\n[选项A'))
+
+    expect(completion.choiceSectionStarted).toBe(true)
+    expect(completion.missingChoiceIds).toEqual(['A', 'B', 'C', 'D'])
+    expect(responseContinuationInstruction(completion)).toContain('若最后一行是不完整选项')
   })
 
   it('does not request status updates when status rules are disabled', () => {
@@ -85,7 +105,22 @@ describe('inspectLatestResponseCompletion', () => {
 
     const completion = inspectLatestResponseCompletion(game)
     expect(completion.statusesComplete).toBe(true)
-    expect(responseContinuationInstruction(completion)).toBe('按要求补全选项')
+    expect(responseContinuationInstruction(completion)).toContain('在剧情部分被截断')
+  })
+
+  it('does not require status updates during a chapter transition', () => {
+    const game = gameWithResponse(
+      '[状态] 地点：大厅；时间：早晨；章节：；场景：切换；在场人物：维纳斯\n[旁白] 新的旅程即将开始。\n[选项A] 一\n[选项B] 二\n[选项C] 三\n[选项D] 四',
+      '记录情绪',
+    )
+    game.narrative.chapterPhase = 'transition'
+
+    expect(inspectLatestResponseCompletion(game)).toMatchObject({
+      complete: true,
+      choicesComplete: true,
+      statusesComplete: true,
+      missingStatusCharacterIds: [],
+    })
   })
 })
 

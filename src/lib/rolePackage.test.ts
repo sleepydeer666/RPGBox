@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankGame } from '../game'
-import { createRoleXml, importRolePackage, parseRoleXml } from './rolePackage'
+import { createRoleXml, exportRolePackage, importRolePackage, parseRoleXml } from './rolePackage'
 
 const filesystemMocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -65,5 +65,54 @@ describe('RPGBox role package', () => {
     expect(imported.name).toBe('系统文件')
     expect(imported.id).toBe('npc-new')
     expect(filesystemMocks.readFile).not.toHaveBeenCalled()
+  })
+
+  it('exports complete character fields and narrative modes for app backup', async () => {
+    const npc = { ...createBlankGame(1).characters[0], role: 'npc' as const }
+    npc.modeDescriptions = { normal: '日常设定', battle: '战斗设定' }
+    npc.portraits = [{ id: 'portrait-1', expression: '认真', tags: ['认真'], groups: ['battle'], uri: 'file:///portrait.png' }]
+    npc.defaultPortraitId = 'portrait-1'
+    npc.defaultPortraitIds = { battle: 'portrait-1' }
+
+    await exportRolePackage(npc, [
+      { id: 'normal', name: '日常', color: '#65b7a5' },
+      { id: 'battle', name: '战斗', color: '#d46c64' },
+    ])
+
+    const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
+    const zip = await JSZip.loadAsync(write.data, { base64: true })
+    const serialized = parseRoleXml(await zip.file('role.xml')!.async('string'))
+    expect(serialized.narrativeModes?.map((mode) => mode.name)).toEqual(['日常', '战斗'])
+    expect(serialized.modeDescriptions).toEqual({ normal: '日常设定', battle: '战斗设定' })
+    expect(serialized.defaultPortraitIds).toEqual({ battle: 'portrait-1' })
+    expect(serialized.defaultPortraitId).toBe('portrait-1')
+    expect(serialized.portraits[0].groups).toEqual(['battle'])
+  })
+
+  it('imports only modes whose names exactly match the target RPG', async () => {
+    const zip = new JSZip()
+    zip.file('role.xml', createRoleXml({
+      id: 'old-id', role: 'npc', name: '匹配测试', gender: '', description: '', color: '#fff',
+      narrativeModes: [
+        { id: 'source-daily', name: '日常', color: '#65b7a5' },
+        { id: 'source-battle', name: '战斗', color: '#d46c64' },
+      ],
+      modeDescriptions: { 'source-daily': '日常设定', 'source-battle': '战斗设定' },
+      defaultPortraitIds: { 'source-daily': 'daily', 'source-battle': 'battle' },
+      portraits: [
+        { id: 'daily', expression: '平静', groups: ['source-daily'], assetPath: 'portraits/daily.png' },
+        { id: 'battle', expression: '战斗', groups: ['source-battle'], assetPath: 'portraits/battle.png' },
+      ],
+    }))
+    zip.file('portraits/daily.png', 'daily', { base64: false })
+    zip.file('portraits/battle.png', 'battle', { base64: false })
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'matched.role.rpgbox')
+    const imported = await importRolePackage(file, 'game-1', 'npc-new', [
+      { id: 'target-daily', name: '日常', color: '#65b7a5' },
+      { id: 'target-other', name: '其他', color: '#d3ab61' },
+    ])
+    expect(imported.modeDescriptions).toEqual({ 'target-daily': '日常设定' })
+    expect(imported.defaultPortraitIds).toEqual({ 'target-daily': 'daily' })
+    expect(imported.portraits.map((portrait) => [portrait.id, portrait.groups])).toEqual([['daily', ['target-daily']]])
   })
 })

@@ -2,15 +2,18 @@ import { BookOpen, Check, Download, FileArchive, FileUp, FolderOpen, ImagePlus, 
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import { hexToHsv, hsvToHex, normalizeHexColor, type HsvColor } from '../lib/color'
-import type { PortraitGroup } from '../types'
+import { createNarrativeMode, DEFAULT_NARRATIVE_MODES, normalizeNarrativeModes, uniqueNarrativeModeName } from '../lib/narrativeModes'
+import type { NarrativeMode, PortraitGroup } from '../types'
 import {
   applyMissingDefaults,
+  bindRoleToNarrativeModes,
   buildRolePackage,
   buildRpgPackage,
   createId,
   downloadPackage,
   groupsForExpression,
   importBatchPortraits,
+  removeDraftNarrativeMode,
   readRpgPackage,
   readRolePackage,
   safeFileName,
@@ -20,7 +23,7 @@ import {
 } from './package'
 
 type Workspace = 'rpg' | 'role'
-type RpgSection = 'basic' | 'rules' | 'opening' | 'characters'
+type RpgSection = 'rules' | 'preferences' | 'characters'
 
 const DEFAULT_CHARACTER: CharacterDraft = {
   id: createId('npc'),
@@ -28,7 +31,7 @@ const DEFAULT_CHARACTER: CharacterDraft = {
   name: '',
   gender: '',
   description: '',
-  nsfwDescription: '',
+  modeDescriptions: {},
   statusBar: '',
   color: '#d3ab61',
   portraits: [],
@@ -47,10 +50,12 @@ const DEFAULT_PLAYER: CharacterDraft = {
 
 const DEFAULT_RPG: RpgDraftSettings = {
   title: '',
-  nsfwEnabled: false,
+  narrativeModes: DEFAULT_NARRATIVE_MODES.map((mode) => ({ ...mode })),
   newStoryChoiceCount: 4,
   storyStylePrompt: '',
+  modeStoryStylePrompts: {},
   chapterTransitionRules: '',
+  narrativeModeRulesPrompt: '',
   recommendedChapterTurnsEnabled: false,
   recommendedChapterTurns: 20,
   statusRulesPrompt: '',
@@ -64,7 +69,8 @@ const DEFAULT_RPG: RpgDraftSettings = {
 
 export default function BuilderApp() {
   const [workspace, setWorkspace] = useState<Workspace>('rpg')
-  const [rpgSection, setRpgSection] = useState<RpgSection>('basic')
+  const [rpgSection, setRpgSection] = useState<RpgSection>('rules')
+  const [styleModeId, setStyleModeId] = useState('global')
   const [rpg, setRpg] = useState(DEFAULT_RPG)
   const [player, setPlayer] = useState(DEFAULT_PLAYER)
   const [participants, setParticipants] = useState<CharacterDraft[]>([])
@@ -89,7 +95,7 @@ export default function BuilderApp() {
     if (!files.length) return
     setWorking(true)
     try {
-      const imported = await Promise.all(files.map(readRolePackage))
+      const imported = (await Promise.all(files.map(readRolePackage))).map((character) => bindRoleToNarrativeModes(character, rpg.narrativeModes))
       setParticipants((current) => [...current, ...imported])
       setSelectedParticipantId(imported.at(-1)?.id ?? 'player')
       flash(`已加入 ${imported.length} 个人物包`)
@@ -146,7 +152,8 @@ export default function BuilderApp() {
         setPlayer(normalizedPlayer)
         setParticipants(importedParticipants)
         setSelectedParticipantId('player')
-        setRpgSection('basic')
+        setRpgSection('rules')
+        setStyleModeId('global')
         flash(`已导入 RPG 剧本包：${imported.settings.title || file.name}`)
       }
     } catch (error) {
@@ -163,6 +170,27 @@ export default function BuilderApp() {
     flash(`批量导入完成：成功 ${result.imported} 张，格式失败 ${result.failed} 张`, result.imported ? 'success' : 'error')
   }
 
+  function addMode() {
+    setRpg((current) => ({ ...current, narrativeModes: [...normalizeNarrativeModes(current.narrativeModes), createNarrativeMode(current.narrativeModes)] }))
+  }
+
+  function patchMode(modeId: string, patchValue: Partial<NarrativeMode>) {
+    setRpg((current) => ({ ...current, narrativeModes: normalizeNarrativeModes(current.narrativeModes).map((mode) => mode.id === modeId ? { ...mode, ...patchValue } : mode) }))
+  }
+
+  function finishModeName(mode: NarrativeMode, value: string) {
+    patchMode(mode.id, { name: uniqueNarrativeModeName(rpg.narrativeModes, mode.id, value) })
+  }
+
+  function deleteMode(modeId: string) {
+    const mode = rpg.narrativeModes.find((item) => item.id === modeId)
+    if (!mode || rpg.narrativeModes.length <= 1 || !window.confirm(`删除叙事模式“${mode.name}”？该模式专属内容将迁移到相邻模式。`)) return
+    const result = removeDraftNarrativeMode(rpg, [player, ...participants], modeId)
+    setRpg(result.settings)
+    setPlayer({ ...result.characters[0], role: 'player' })
+    setParticipants(result.characters.slice(1).map((character) => ({ ...character, role: 'npc' })))
+  }
+
   return (
     <main className="builder-shell">
       <header className="builder-header">
@@ -176,37 +204,37 @@ export default function BuilderApp() {
 
       {workspace === 'rpg' ? <div className="builder-workspace">
         <aside className="section-nav">
-          <NavButton active={rpgSection === 'basic'} icon={<FileArchive size={17} />} label="基本信息" onClick={() => setRpgSection('basic')} />
-          <NavButton active={rpgSection === 'rules'} icon={<BookOpen size={17} />} label="剧情设置" onClick={() => setRpgSection('rules')} />
-          <NavButton active={rpgSection === 'opening'} icon={<ImagePlus size={17} />} label="开场设置" onClick={() => setRpgSection('opening')} />
-          <NavButton active={rpgSection === 'characters'} icon={<Users size={17} />} label="参与人物" badge={participants.length + 1} onClick={() => setRpgSection('characters')} />
+          <NavButton active={rpgSection === 'rules'} icon={<BookOpen size={17} />} label="RPG规则" badge={rpg.narrativeModes.length} onClick={() => setRpgSection('rules')} />
+          <NavButton active={rpgSection === 'preferences'} icon={<FileArchive size={17} />} label="设定与偏好" onClick={() => setRpgSection('preferences')} />
+          <NavButton active={rpgSection === 'characters'} icon={<Users size={17} />} label="登场人物" badge={participants.length + 1} onClick={() => setRpgSection('characters')} />
         </aside>
         <section className="editor-scroll">
-          {rpgSection === 'basic' && <EditorPage title="基本信息" eyebrow="RPG PACKAGE">
-            <Field label="RPG 名称" required><input value={rpg.title} onChange={(event) => setRpg({ ...rpg, title: event.target.value })} placeholder="未命名 RPG" /></Field>
-            <Toggle checked={rpg.nsfwEnabled} onChange={(nsfwEnabled) => setRpg({ ...rpg, nsfwEnabled })} label="启用 NSFW 内容" />
-          </EditorPage>}
-          {rpgSection === 'rules' && <EditorPage title="剧情设置" eyebrow="STORY RULES">
-            <Field label="剧情规则与文风"><textarea value={rpg.storyStylePrompt} onChange={(event) => setRpg({ ...rpg, storyStylePrompt: event.target.value })} /></Field>
+          {rpgSection === 'rules' && <EditorPage title="RPG规则" eyebrow="RPG RULES">
             <Field label="章节切换规则"><textarea value={rpg.chapterTransitionRules} onChange={(event) => setRpg({ ...rpg, chapterTransitionRules: event.target.value })} /></Field>
+            <Field label="叙事模式切换规则"><textarea value={rpg.narrativeModeRulesPrompt} onChange={(event) => setRpg({ ...rpg, narrativeModeRulesPrompt: event.target.value })} /></Field>
             <div className="form-grid"><Field label="章节开始时选项数"><input type="number" min="4" max="10" value={rpg.newStoryChoiceCount} onChange={(event) => setRpg({ ...rpg, newStoryChoiceCount: Number(event.target.value) })} /></Field><Field label="单章节推荐对话数"><input type="number" min="10" max="30" disabled={!rpg.recommendedChapterTurnsEnabled} value={rpg.recommendedChapterTurns} onChange={(event) => setRpg({ ...rpg, recommendedChapterTurns: Number(event.target.value) })} /></Field></div>
             <Toggle checked={rpg.recommendedChapterTurnsEnabled} onChange={(recommendedChapterTurnsEnabled) => setRpg({ ...rpg, recommendedChapterTurnsEnabled })} label="启用单章节推荐对话数" />
             <Field label="状态栏规则"><textarea value={rpg.statusRulesPrompt} onChange={(event) => setRpg({ ...rpg, statusRulesPrompt: event.target.value })} /></Field>
+            <section className="builder-subsection"><div className="builder-section-heading"><div><h2>叙事模式</h2><p>首个模式是新游戏和未指定状态的默认模式。模式名称会用于导入人物包时进行精确匹配。</p></div><button className="secondary-button" onClick={addMode}><Plus size={15} />新增模式</button></div>
+            <div className="builder-mode-list">{normalizeNarrativeModes(rpg.narrativeModes).map((mode, index) => <section className="builder-mode-item" key={mode.id}>
+              <div className="builder-mode-row"><span className="builder-mode-index">{index + 1}</span><Field label="模式名称"><input defaultValue={mode.name} onBlur={(event) => finishModeName(mode, event.target.value)} /></Field><Field label="标识颜色"><input type="color" value={mode.color} onChange={(event) => patchMode(mode.id, { color: event.target.value })} /></Field><button className="icon-danger" disabled={rpg.narrativeModes.length <= 1} onClick={() => deleteMode(mode.id)} title="删除模式"><Trash2 size={16} /></button></div>
+            </section>)}</div>
+            </section>
+          </EditorPage>}
+          {rpgSection === 'preferences' && <EditorPage title="设定与偏好" eyebrow="SETTING & PREFERENCES">
+            <Field label="RPG 名称" required><input value={rpg.title} onChange={(event) => setRpg({ ...rpg, title: event.target.value })} placeholder="未命名 RPG" /></Field>
             <Field label="故事背景设定"><textarea value={rpg.worldSettingPrompt} onChange={(event) => setRpg({ ...rpg, worldSettingPrompt: event.target.value })} /></Field>
-            {rpg.nsfwEnabled && <Field label="NSFW 场景偏好"><textarea value={rpg.nsfwScenePrompt} onChange={(event) => setRpg({ ...rpg, nsfwScenePrompt: event.target.value })} /></Field>}
+            <Field label="NSFW 场景偏好"><textarea value={rpg.nsfwScenePrompt} onChange={(event) => setRpg({ ...rpg, nsfwScenePrompt: event.target.value })} /></Field>
+            <section className="builder-subsection"><div className="builder-section-heading"><div><h2>叙事文风</h2><p>全局文风会与当前叙事模式的专属文风共同生效。</p></div></div><div className="builder-mode-tabs" role="tablist" aria-label="叙事文风模式"><button className={styleModeId === 'global' ? 'active' : ''} onClick={() => setStyleModeId('global')}>全局</button>{normalizeNarrativeModes(rpg.narrativeModes).map((mode) => <button className={styleModeId === mode.id ? 'active' : ''} key={mode.id} onClick={() => setStyleModeId(mode.id)}><span style={{ background: mode.color }} />{mode.name}</button>)}</div>{styleModeId === 'global' ? <Field label="全局剧情规则与文风"><textarea value={rpg.storyStylePrompt} onChange={(event) => setRpg({ ...rpg, storyStylePrompt: event.target.value })} /></Field> : <Field label={`${rpg.narrativeModes.find((mode) => mode.id === styleModeId)?.name ?? '当前模式'}专属文风提示词`}><textarea value={rpg.modeStoryStylePrompts?.[styleModeId] ?? ''} onChange={(event) => setRpg({ ...rpg, modeStoryStylePrompts: { ...rpg.modeStoryStylePrompts, [styleModeId]: event.target.value } })} placeholder="可留空；仅在当前模式下与全局文风共同生效" /></Field>}</section>
+            <section className="builder-subsection"><div className="builder-section-heading"><div><h2>初始状态</h2><p>这些内容用于新游戏开始时的地点、时间、章节和第一条消息。</p></div></div><div className="form-grid"><Field label="初始地点"><input value={rpg.location} onChange={(event) => setRpg({ ...rpg, location: event.target.value })} /></Field><Field label="初始时间"><input value={rpg.time} onChange={(event) => setRpg({ ...rpg, time: event.target.value })} /></Field></div><Field label="初始章节名"><input value={rpg.chapterTitle} onChange={(event) => setRpg({ ...rpg, chapterTitle: event.target.value })} /></Field><Field label="开场内容"><textarea className="opening-textarea" value={rpg.openingMessage} onChange={(event) => setRpg({ ...rpg, openingMessage: event.target.value })} placeholder="可使用 RPGBox 的 [状态]、[旁白]、角色（表情）及 [选项A] 格式" /></Field></section>
           </EditorPage>}
-          {rpgSection === 'opening' && <EditorPage title="开场设置" eyebrow="OPENING STATE">
-            <div className="form-grid"><Field label="初始地点"><input value={rpg.location} onChange={(event) => setRpg({ ...rpg, location: event.target.value })} /></Field><Field label="初始时间"><input value={rpg.time} onChange={(event) => setRpg({ ...rpg, time: event.target.value })} /></Field></div>
-            <Field label="初始章节名"><input value={rpg.chapterTitle} onChange={(event) => setRpg({ ...rpg, chapterTitle: event.target.value })} /></Field>
-            <Field label="开场内容"><textarea className="opening-textarea" value={rpg.openingMessage} onChange={(event) => setRpg({ ...rpg, openingMessage: event.target.value })} placeholder="可使用 RPGBox 的 [状态]、[旁白]、角色（表情）及 [选项A] 格式" /></Field>
-          </EditorPage>}
-          {rpgSection === 'characters' && <EditorPage title="参与人物" eyebrow="CAST">
+          {rpgSection === 'characters' && <EditorPage title="登场人物" eyebrow="CAST">
             <div className="cast-toolbar"><div className="cast-tabs"><button className={selectedParticipantId === 'player' ? 'active' : ''} onClick={() => setSelectedParticipantId('player')}><span style={{ background: player.color }} />{player.name || '主角'}<small>主角</small></button>{participants.map((character) => <button className={selectedParticipantId === character.id ? 'active' : ''} onClick={() => setSelectedParticipantId(character.id)} key={character.id}><span style={{ background: character.color }} />{character.name || '未命名'}<small>NPC</small></button>)}</div><label className="secondary-button"><FileUp size={16} />导入人物包<input hidden type="file" multiple accept=".role.rpgbox" onChange={(event) => void importParticipants(event)} /></label></div>
-            {selectedParticipant && <CharacterFields character={selectedParticipant} nsfwEnabled={rpg.nsfwEnabled} compact onChange={(next) => selectedParticipantId === 'player' ? setPlayer(next) : setParticipants((current) => current.map((item) => item.id === next.id ? next : item))} onDelete={selectedParticipantId === 'player' ? undefined : () => { setParticipants((current) => current.filter((item) => item.id !== selectedParticipantId)); setSelectedParticipantId('player') }} />}
+            {selectedParticipant && <CharacterFields character={selectedParticipant} compact narrativeModes={rpg.narrativeModes} onChange={(next) => selectedParticipantId === 'player' ? setPlayer(next) : setParticipants((current) => current.map((item) => item.id === next.id ? next : item))} onDelete={selectedParticipantId === 'player' ? undefined : () => { setParticipants((current) => current.filter((item) => item.id !== selectedParticipantId)); setSelectedParticipantId('player') }} />}
           </EditorPage>}
         </section>
       </div> : <section className="role-workspace editor-scroll"><EditorPage title="人物包" eyebrow="CHARACTER PACKAGE">
-        <CharacterFields character={role} nsfwEnabled onChange={setRole} onBatch={() => setBatchPromptOpen(true)} />
+        <CharacterFields character={role} onChange={setRole} onBatch={() => setBatchPromptOpen(true)} />
       </EditorPage></section>}
 
       {notice && <div className={`builder-toast ${notice.tone}`} role="status"><span>{notice.tone === 'success' ? <Check size={16} /> : <X size={16} />}</span>{notice.text}<button onClick={() => setNotice(null)} title="关闭"><X size={15} /></button></div>}
@@ -217,11 +245,17 @@ export default function BuilderApp() {
   )
 }
 
-function CharacterFields({ character, nsfwEnabled, compact = false, onChange, onDelete, onBatch }: { character: CharacterDraft; nsfwEnabled: boolean; compact?: boolean; onChange: (character: CharacterDraft) => void; onDelete?: () => void; onBatch?: () => void }) {
+function CharacterFields({ character, compact = false, narrativeModes, onChange, onDelete, onBatch }: { character: CharacterDraft; compact?: boolean; narrativeModes?: NarrativeMode[]; onChange: (character: CharacterDraft) => void; onDelete?: () => void; onBatch?: () => void }) {
   const [colorError, setColorError] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [colorPickerStream, setColorPickerStream] = useState<MediaStream | null>(null)
+  const modes = narrativeModes ? normalizeNarrativeModes(narrativeModes) : []
+  const [selectedModeId, setSelectedModeId] = useState(modes[0]?.id ?? '')
+  const selectedMode = modes.find((mode) => mode.id === selectedModeId) ?? modes[0]
   const screenPickerSupported = typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getDisplayMedia)
+  useEffect(() => {
+    if (modes.length && !modes.some((mode) => mode.id === selectedModeId)) setSelectedModeId(modes[0].id)
+  }, [modes, selectedModeId])
   function patch(patchValue: Partial<CharacterDraft>) { onChange({ ...character, ...patchValue }) }
   async function pickScreenColor() {
     setColorError('')
@@ -246,9 +280,10 @@ function CharacterFields({ character, nsfwEnabled, compact = false, onChange, on
     if (!files.length) return
     const additions: PortraitDraft[] = files.map((file, index) => {
       const expression = file.name.replace(/\.[^.]+$/u, '').split('_').at(-1)?.trim() || `表情${character.portraits.length + index + 1}`
-      return { id: createId('portrait'), expression, tags: [expression], groups: groupsForExpression(expression), file, extension: file.name.match(/\.([^.]+)$/u)?.[1]?.toLowerCase() ?? 'png', previewUrl: URL.createObjectURL(file) }
+      return { id: createId('portrait'), expression, tags: [expression], groups: selectedMode ? groupsForExpression(expression, selectedMode.id) : undefined, file, extension: file.name.match(/\.([^.]+)$/u)?.[1]?.toLowerCase() ?? 'png', previewUrl: URL.createObjectURL(file) }
     })
-    onChange(applyMissingDefaults({ ...character, portraits: [...character.portraits, ...additions] }))
+    const next = { ...character, portraits: [...character.portraits, ...additions] }
+    onChange(selectedMode ? applyMissingDefaults(next, modes) : { ...next, defaultPortraitId: next.defaultPortraitId ?? additions[0]?.id })
   }
   function patchPortrait(id: string, value: Partial<PortraitDraft>) { patch({ portraits: character.portraits.map((portrait) => portrait.id === id ? { ...portrait, ...value } : portrait) }) }
   function removePortrait(id: string) {
@@ -262,7 +297,7 @@ function CharacterFields({ character, nsfwEnabled, compact = false, onChange, on
     if (!next.includes(group) && defaults[group] === portrait.id) delete defaults[group]
     patch({ portraits: character.portraits.map((item) => item.id === portrait.id ? { ...item, groups: next } : item), defaultPortraitIds: defaults })
   }
-  function makeDefault(portrait: PortraitDraft, group: PortraitGroup) { patch({ defaultPortraitId: group === 'normal' ? portrait.id : character.defaultPortraitId, defaultPortraitIds: { ...character.defaultPortraitIds, [group]: portrait.id } }) }
+  function makeDefault(portrait: PortraitDraft, group: PortraitGroup) { patch({ defaultPortraitId: group === modes[0]?.id ? portrait.id : character.defaultPortraitId, defaultPortraitIds: { ...character.defaultPortraitIds, [group]: portrait.id } }) }
 
   return <div className={`character-form ${compact ? 'compact' : ''}`}>
     <div className="character-heading"><div className="character-avatar" style={{ borderColor: character.color }}>{character.name.trim().charAt(0) || '?'}</div><div><strong>{character.name || '未命名人物'}</strong><span>{character.role === 'player' ? 'PLAYER' : 'NON-PLAYER CHARACTER'}</span></div>{onDelete && <button className="icon-danger" title="移除人物" onClick={onDelete}><Trash2 size={17} /></button>}</div>
@@ -270,10 +305,10 @@ function CharacterFields({ character, nsfwEnabled, compact = false, onChange, on
     <Field label="主体颜色"><div className="color-control"><div className="color-field"><button type="button" className={`color-preview ${paletteOpen ? 'active' : ''}`} style={{ backgroundColor: normalizeHexColor(character.color, '#d3ab61') }} onClick={() => setPaletteOpen((current) => !current)} aria-label="打开调色盘" aria-expanded={paletteOpen} title="打开调色盘"><Palette size={16} /></button><button type="button" className="screen-eyedropper-button" disabled={!screenPickerSupported} onClick={() => void pickScreenColor()} aria-label="从其他窗口取色" title={screenPickerSupported ? '从其他窗口取色' : '当前浏览器不支持窗口取色'}><Pipette size={17} /></button><input value={character.color} onChange={(event) => patch({ color: event.target.value })} onBlur={() => patch({ color: normalizeHexColor(character.color, '#d3ab61') })} aria-label="主体颜色十六进制值" /></div>{paletteOpen && <BuilderColorPalette value={character.color} onChange={(color) => patch({ color })} />}{colorError && <span className="color-error">{colorError}</span>}</div></Field>
     <Field label="人物设定"><textarea value={character.description} onChange={(event) => patch({ description: event.target.value })} /></Field>
     <Field label="状态栏"><textarea className="short-textarea" value={character.statusBar ?? ''} onChange={(event) => patch({ statusBar: event.target.value })} /></Field>
-    {nsfwEnabled && <Field label="NSFW 设定"><textarea value={character.nsfwDescription ?? ''} onChange={(event) => patch({ nsfwDescription: event.target.value })} /></Field>}
-    {!compact && <div className="portrait-block"><div className="portrait-head"><div><h3>立绘与表情</h3><span>{character.portraits.length} 张</span></div><div>{onBatch && <button className="secondary-button" onClick={onBatch}><FolderOpen size={16} />批量导入</button>}<label className="secondary-button"><ImagePlus size={16} />添加立绘<input hidden type="file" multiple accept="image/*" onChange={addPortrait} /></label></div></div>
-      {!character.portraits.length ? <div className="empty-portraits"><ImagePlus size={28} /><span>尚未添加立绘</span></div> : <div className="portrait-grid">{character.portraits.map((portrait) => { const groups = portrait.groups ?? ['normal']; return <article className="portrait-card" key={portrait.id}><div className="portrait-preview"><img src={portrait.previewUrl} alt={portrait.expression} /><button onClick={() => removePortrait(portrait.id)} title="删除立绘"><Trash2 size={15} /></button></div><div className="portrait-fields"><Field label="表情标签"><input value={(portrait.tags ?? [portrait.expression]).join('，')} onChange={(event) => { const tags = event.target.value.split(/[，,]/u).map((tag) => tag.trim()).filter(Boolean); patchPortrait(portrait.id, { tags, expression: tags[0] ?? '' }) }} /></Field><div className="group-row"><label><input type="checkbox" checked={groups.includes('normal')} onChange={() => toggleGroup(portrait, 'normal')} />普通</label><label><input type="checkbox" checked={groups.includes('nsfw')} onChange={() => toggleGroup(portrait, 'nsfw')} />NSFW</label></div><div className="default-row"><button className={(character.defaultPortraitIds?.normal ?? character.defaultPortraitId) === portrait.id ? 'active' : ''} disabled={!groups.includes('normal')} onClick={() => makeDefault(portrait, 'normal')}><Star size={13} />普通默认</button><button className={character.defaultPortraitIds?.nsfw === portrait.id ? 'active' : ''} disabled={!groups.includes('nsfw')} onClick={() => makeDefault(portrait, 'nsfw')}><Star size={13} />NSFW 默认</button></div></div></article> })}</div>}
-    </div>}
+    {selectedMode && <section className="builder-character-modes"><div className="builder-mode-tabs" role="tablist" aria-label="人物叙事模式">{modes.map((mode) => <button className={mode.id === selectedMode.id ? 'active' : ''} key={mode.id} onClick={() => setSelectedModeId(mode.id)}><span style={{ background: mode.color }} />{mode.name}</button>)}</div><Field label={`${selectedMode.name}特殊设定`}><textarea value={character.modeDescriptions?.[selectedMode.id] ?? ''} onChange={(event) => patch({ modeDescriptions: { ...character.modeDescriptions, [selectedMode.id]: event.target.value } })} placeholder="可留空；仅在当前叙事模式下生效" /></Field></section>}
+    <div className="portrait-block"><div className="portrait-head"><div><h3>立绘与表情</h3><span>{character.portraits.length} 张</span></div><div>{onBatch && <button className="secondary-button" onClick={onBatch}><FolderOpen size={16} />批量导入</button>}<label className="secondary-button"><ImagePlus size={16} />添加立绘<input hidden type="file" multiple accept="image/*" onChange={addPortrait} /></label></div></div>
+      {!character.portraits.length ? <div className="empty-portraits"><ImagePlus size={28} /><span>尚未添加立绘</span></div> : <div className="portrait-grid">{character.portraits.map((portrait) => { const groups = portrait.groups ?? (modes[0] ? [modes[0].id] : []); const active = selectedMode ? groups.includes(selectedMode.id) : true; const isDefault = selectedMode ? (character.defaultPortraitIds?.[selectedMode.id] ?? (selectedMode.id === modes[0].id ? character.defaultPortraitId : undefined)) === portrait.id : character.defaultPortraitId === portrait.id; return <article className={`portrait-card ${selectedMode && !active ? 'inactive' : ''}`} key={portrait.id}><div className="portrait-preview"><img src={portrait.previewUrl} alt={portrait.expression} /><button onClick={() => removePortrait(portrait.id)} title="删除立绘"><Trash2 size={15} /></button></div><div className="portrait-fields"><Field label="表情标签"><input value={(portrait.tags ?? [portrait.expression]).join('，')} onChange={(event) => { const tags = event.target.value.split(/[，,]/u).map((tag) => tag.trim()).filter(Boolean); patchPortrait(portrait.id, { tags, expression: tags[0] ?? '' }) }} /></Field>{selectedMode ? <><div className="group-row"><label><input type="checkbox" checked={active} onChange={() => toggleGroup(portrait, selectedMode.id)} />在“{selectedMode.name}”模式启用</label></div><div className="default-row"><button className={isDefault ? 'active' : ''} disabled={!active} onClick={() => makeDefault(portrait, selectedMode.id)}><Star size={13} />{isDefault ? '默认立绘' : '设为默认'}</button></div></> : <div className="default-row"><button className={isDefault ? 'active' : ''} onClick={() => patch({ defaultPortraitId: portrait.id })}><Star size={13} />{isDefault ? '通用默认立绘' : '设为通用默认'}</button></div>}</div></article> })}</div>}
+    </div>
     {colorPickerStream && <ScreenColorPicker stream={colorPickerStream} onSelect={(color) => { patch({ color }); closeColorPicker() }} onClose={closeColorPicker} />}
   </div>
 }

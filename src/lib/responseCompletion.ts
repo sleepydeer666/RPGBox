@@ -5,7 +5,9 @@ export interface ResponseCompletionState {
   canContinue: boolean
   complete: boolean
   hasChoices: boolean
+  choiceSectionStarted: boolean
   choicesComplete: boolean
+  missingChoiceIds: string[]
   statusesComplete: boolean
   expectedChoiceCount: number
   missingStatusCharacterIds: string[]
@@ -18,45 +20,44 @@ export interface ContinuationMergeResult {
 }
 
 export function responseContinuationInstruction(completion: ResponseCompletionState): string {
-  const instructions = [
-    ...(!completion.choicesComplete ? ['按要求补全选项'] : []),
-    ...(!completion.statusesComplete ? ['按要求输出状态栏更新'] : []),
-  ]
-  return instructions.join('，并') || '继续输出完整'
+  if (completion.choicesComplete) return '继续输出完整'
+  const missingChoices = completion.missingChoiceIds.join('、')
+  if (completion.choiceSectionStarted) {
+    return `上一条回复因输出长度限制在选项部分被截断。不要重复已完整输出的剧情或选项。若最后一行是不完整选项，先从该行开头完整重写该选项；然后按顺序仅补齐缺失的选项（${missingChoices}）。每个新增选项仍须遵守本轮输出契约。只输出续写部分。`
+  }
+  return '上一条回复因输出长度限制在剧情部分被截断。请从最后一个未完成的剧情行开始续写：若最后一行不完整，先从该行开头完整重写；不要重复此前已完整输出的内容。补完剧情后，严格按本轮输出契约输出完整的A-D选项。只输出续写部分。'
 }
 
 export function inspectLatestResponseCompletion(game: GameSession): ResponseCompletionState {
   const assistantIndex = game.messages.map((message) => message.role).lastIndexOf('assistant')
   const assistant = game.messages[assistantIndex]
   const canContinue = assistantIndex > 0 && game.messages[assistantIndex - 1]?.role === 'user'
-  const parsed = parseAssistantResponse(assistant?.rawContent ?? assistant?.content ?? '', { characters: game.characters })
+  const parsed = parseAssistantResponse(assistant?.rawContent ?? assistant?.content ?? '', {
+    characters: game.characters,
+    contentMode: assistant?.rpgStateId ?? game.gameState.contentMode,
+    initialContentMode: assistant?.initialRpgStateId ?? assistant?.rpgStateId ?? game.gameState.contentMode,
+    narrativeModes: game.narrativeModes,
+  })
   const expectedChoiceCount = 4
   const choiceIds = new Set(parsed.choices.map((choice) => choice.id.toUpperCase()))
-  const choicesComplete = Array.from({ length: expectedChoiceCount }, (_, index) => String.fromCharCode(65 + index))
-    .every((id) => choiceIds.has(id))
+  const expectedChoiceIds = Array.from({ length: expectedChoiceCount }, (_, index) => String.fromCharCode(65 + index))
+  const missingChoiceIds = expectedChoiceIds.filter((id) => !choiceIds.has(id))
+  const choicesComplete = missingChoiceIds.length === 0
+  const raw = assistant?.rawContent ?? assistant?.content ?? ''
+  const choiceSectionStarted = parsed.choices.length > 0 || raw.split(/\r?\n/u).some((line) =>
+    /^\s*(?:\[选项\s*[A-D]?|\[[A-D](?:\]|\s)|[A-D]\s*[.、:：])/iu.test(line))
 
-  const reportedPresentIds = parsed.chapterBoundaryIndexes.length
-    ? []
-    : parsed.gameData?.statePatch?.presentCharacterIds
-  const presentIds = Array.isArray(reportedPresentIds)
-    ? reportedPresentIds.filter((id): id is string => typeof id === 'string')
-    : game.gameState.presentCharacterIds ?? []
-  const presentNpcIds = new Set(game.characters
-    .filter((character) => character.role === 'npc' && presentIds.includes(character.id))
-    .map((character) => character.id))
-  const updatedIds = new Set(parsed.characterStatusUpdates.map((update) => update.characterId))
-  const statusRulesEnabled = Boolean(game.statusRulesPrompt?.trim())
-  const missingStatusCharacterIds = statusRulesEnabled
-    ? [...presentNpcIds].filter((id) => !updatedIds.has(id))
-    : []
-  const statusesComplete = missingStatusCharacterIds.length === 0
-  const complete = choicesComplete && (!statusRulesEnabled || statusesComplete)
+  const missingStatusCharacterIds: string[] = []
+  const statusesComplete = true
+  const complete = choicesComplete
 
   return {
     canContinue,
     complete,
     hasChoices: parsed.choices.length > 0,
+    choiceSectionStarted,
     choicesComplete,
+    missingChoiceIds,
     statusesComplete,
     expectedChoiceCount,
     missingStatusCharacterIds,

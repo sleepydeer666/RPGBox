@@ -1,9 +1,10 @@
 import { DEFAULT_GAME_STATE, DEFAULT_SYSTEM_PROMPT } from './config'
 import { createNpcId } from './lib/migrations'
 import { normalizeMemoryState } from './lib/memory'
+import { DEFAULT_NARRATIVE_MODES } from './lib/narrativeModes'
 import type { CharacterProfile, GameAiSettings, GameSession, NarrativeProgress, ProviderProfile } from './types'
 
-export const OPENING_MESSAGE = `[状态] 模式：常规；地点：旧城区旅店；时间：深夜；章节：雨夜来客；场景：延续
+export const OPENING_MESSAGE = `[状态] 地点：旧城区旅店；时间：深夜；章节：雨夜来客；在场人物：莉亚
 [旁白] 雨水沿着旅店的彩绘玻璃缓慢滑落。莉亚坐在壁炉旁，听见你的脚步后抬起头，却很快移开了目光。
 莉亚（紧张）：你还是来了。今晚有人跟踪我。我们恐怕没有多少时间。
 [旁白] 她把一枚沾着泥水的银色徽章推到桌面中央。火光映在徽章残缺的纹路上，那正是三日前失踪商队留下的标志。
@@ -15,6 +16,7 @@ export function createDefaultAiSettings(provider?: ProviderProfile): GameAiSetti
   return {
     providerId: provider?.id ?? 'default-provider',
     model: provider?.model ?? 'gpt-4o-mini',
+    useCompatiblePromptFormat: true,
     temperature: provider?.temperature ?? 0.5,
     topP: provider?.topP ?? 1,
     presencePenalty: provider?.presencePenalty ?? 0,
@@ -32,7 +34,7 @@ export function createDefaultCharacters(focusCharacter = '莉亚'): CharacterPro
     name: '主角',
     gender: '男',
     description: '由用户扮演。AI不得替主角决定关键行动、想法或台词。',
-    nsfwDescription: '',
+    modeDescriptions: {},
     statusBar: '',
     color: '#65b7a5',
     portraits: [],
@@ -45,7 +47,7 @@ export function createDefaultCharacters(focusCharacter = '莉亚'): CharacterPro
       name: focusCharacter,
       gender: '女',
       description: '主要NPC。请在RPG设置中补充性格、服饰、口癖和人物关系。',
-      nsfwDescription: '',
+      modeDescriptions: {},
       statusBar: '',
       color: '#d3ab61',
       portraits: [],
@@ -58,6 +60,7 @@ export function createDefaultNarrative(chapterTitle = '', _unitTitle = '', messa
   const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return {
     chapter: { id: `chapter-${stamp}`, title: chapterTitle, startedAtMessageId: messageId },
+    chapterPhase: chapterTitle.trim() ? 'active' : 'opening',
   }
 }
 
@@ -67,12 +70,14 @@ export function createInitialGame(): GameSession {
     id: 'game-rainy-night',
     title: '雨夜来客',
     note: '',
-    nsfwEnabled: false,
+    narrativeModes: DEFAULT_NARRATIVE_MODES.map((mode) => ({ ...mode })),
     newStoryChoiceCount: 4,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     aiSettings: createDefaultAiSettings(),
     storyStylePrompt: DEFAULT_SYSTEM_PROMPT,
+    modeStoryStylePrompts: {},
     chapterTransitionRules: '',
+    narrativeModeRulesPrompt: '',
     recommendedChapterTurnsEnabled: false,
     recommendedChapterTurns: 20,
     statusRulesPrompt: '',
@@ -94,12 +99,14 @@ export function createBlankGame(index: number, provider?: ProviderProfile): Game
     id: `game-${now}-${Math.random().toString(16).slice(2)}`,
     title: `新RPG ${index}`,
     note: '',
-    nsfwEnabled: false,
+    narrativeModes: DEFAULT_NARRATIVE_MODES.map((mode) => ({ ...mode })),
     newStoryChoiceCount: 4,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     aiSettings: createDefaultAiSettings(provider),
     storyStylePrompt: DEFAULT_SYSTEM_PROMPT,
+    modeStoryStylePrompts: {},
     chapterTransitionRules: '',
+    narrativeModeRulesPrompt: '',
     recommendedChapterTurnsEnabled: false,
     recommendedChapterTurns: 20,
     statusRulesPrompt: '',

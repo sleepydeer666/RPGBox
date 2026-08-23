@@ -61,6 +61,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .builder-field textarea.short-textarea { min-height: 78px; }
 .builder-field textarea.opening-textarea { min-height: 260px; font-family: Consolas, "Microsoft YaHei", monospace; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.builder-subsection { display: grid; gap: 14px; padding-top: 22px; border-top: 1px solid var(--line); }
+.builder-subsection h2 { margin: 0 0 5px; color: var(--text); font-size: 14px; }
+.builder-subsection p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.builder-subsection .builder-section-heading { align-items: flex-start; }
+.builder-section-heading { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 11px; }
+.builder-mode-list { display: grid; gap: 14px; }
+.builder-mode-item { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); display: grid; gap: 16px; }
+.builder-mode-row { display: grid; grid-template-columns: 28px minmax(180px, 1fr) 92px 34px; align-items: end; gap: 12px; }
+.builder-mode-index { width: 28px; height: 40px; border: 1px solid var(--line); border-radius: 4px; display: grid; place-items: center; color: var(--gold); font-size: 11px; }
+.builder-mode-row input[type='color'] { width: 100%; height: 40px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: #131512; cursor: pointer; }
 .builder-toggle { width: max-content; display: grid; grid-template-columns: 38px auto; align-items: center; gap: 10px; cursor: pointer; }
 .builder-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .builder-toggle > span { width: 38px; height: 21px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 11px; background: #111310; }
@@ -87,6 +97,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .character-heading > div:nth-child(2) { display: grid; gap: 4px; }
 .character-heading strong { font-size: 15px; }
 .character-heading span { color: var(--muted); font-size: 9px; letter-spacing: 1px; }
+.builder-character-modes { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: #141613; display: grid; gap: 16px; }
+.builder-mode-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.builder-mode-tabs button { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: #111310; color: var(--muted); display: flex; align-items: center; gap: 7px; font-size: 10px; cursor: pointer; }
+.builder-mode-tabs button span { width: 8px; height: 8px; border-radius: 50%; }
+.builder-mode-tabs button.active { border-color: var(--gold); color: var(--text); }
 .icon-danger { width: 34px; height: 34px; border: 1px solid rgba(215, 119, 112, .3); border-radius: 5px; background: transparent; color: var(--red); display: grid; place-items: center; cursor: pointer; }
 .color-control { display: grid; gap: 7px; }
 .color-field { display: grid; grid-template-columns: 42px 42px 160px; gap: 8px; }
@@ -122,6 +137,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .empty-portraits { height: 150px; border: 1px dashed var(--line-strong); border-radius: 5px; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
 .portrait-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .portrait-card { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px; }
+.portrait-card.inactive { opacity: .58; }
 .portrait-preview { width: 112px; aspect-ratio: 2 / 3; position: relative; overflow: hidden; background: #0d0f0c; }
 .portrait-preview img { width: 100%; height: 100%; object-fit: contain; }
 .portrait-preview button { position: absolute; top: 5px; right: 5px; width: 28px; height: 28px; padding: 0; border: 1px solid rgba(215,119,112,.45); border-radius: 4px; background: rgba(16,18,15,.88); color: var(--red); display: grid; place-items: center; cursor: pointer; }

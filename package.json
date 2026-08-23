@@ -1,11 +1,13 @@
 {
   "name": "rpgbox",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "build:web": "tsc -p tsconfig.app.json --noEmit && vite build --mode web",
+    "preview:web": "vite preview --host 0.0.0.0",
     "build:builder:offline": "tsc -p tsconfig.app.json --noEmit && vite build --config vite.builder.config.ts && node tools/build-offline-builder.mjs",
     "preview": "vite preview",
     "test": "vitest run",
