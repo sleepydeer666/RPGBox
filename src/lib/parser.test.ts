@@ -54,6 +54,26 @@ describe('parseAssistantResponse', () => {
       type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '', text: '我会留在这里。',
     })
     expect(hasProtocolAnomaly('[状态] 地点：大厅；时间：夜晚；在场人物：维纳斯\n维纳斯：我会留在这里。', { characters })).toBe(false)
+    expect(standardResponse('[状态] 地点：大厅；时间：夜晚；在场人物：维纳斯\n维纳斯：我会留在这里。', { characters }))
+      .toContain('维纳斯：我会留在这里。')
+  })
+
+  it('keeps state annotations aligned after a bare player dialogue', () => {
+    const parsed = parseAssistantResponse([
+      '[状态] 地点：门厅；时间：清晨；在场人物：亚瑟、维纳斯',
+      '[旁白] 门缓缓打开。',
+      '亚瑟：先等一下。',
+      '[状态] 地点：庭院；时间：上午；在场人物：亚瑟、维纳斯',
+      '维纳斯（平静）：现在可以走了。',
+    ].join('\n'), {
+      characters: [
+        { id: 'player', name: '亚瑟', role: 'player' },
+        { id: 'venus', name: '维纳斯', role: 'npc' },
+      ],
+    })
+
+    expect(parsed.segments[1].statePatch).toMatchObject({ location: '门厅', time: '清晨' })
+    expect(parsed.segments[2].statePatch).toMatchObject({ location: '庭院', time: '上午' })
   })
 
   it('parses strict dialogue lines and maps configured character names', () => {
@@ -209,6 +229,13 @@ describe('parseAssistantResponse', () => {
     expect(parsed.choices).toEqual([{ id: 'A', text: '回应' }])
   })
 
+  it('does not replace visible text segments when legacy game data closes', () => {
+    const raw = '[旁白] 页面已经显示。\n<game-data>{"segments":[{"type":"narration","text":"旧数据替换内容"}],"choices":[]}</game-data>'
+    const parsed = parseAssistantResponse(raw)
+
+    expect(parsed.segments).toEqual([{ type: 'narration', text: '页面已经显示。' }])
+  })
+
   it('extracts narrative boundaries without displaying them as story segments', () => {
     const parsed = parseAssistantResponse('[篇章结束]\n[篇章开始] 地下城探索\n[单元开始] 第一层入口\n[旁白] 众人走入遗迹。\nA. 检查墙壁')
 
@@ -280,6 +307,13 @@ describe('parseAssistantResponse', () => {
 
     expect(parsed.choices[0]).toEqual({ id: 'A', text: '留在大厅（后续叙事模式：正常）', targetContentMode: 'normal' })
     expect(parsed.choices[1]).toEqual({ id: 'B', text: '离开大厅（后续叙事模式：NSFW）（结束章节）', targetContentMode: 'nsfw' })
+  })
+
+  it('accepts half-width parentheses around choice mode and chapter-end labels', () => {
+    const parsed = parseAssistantResponse('[状态] 地点：大厅；时间：夜晚；在场人物：无\n[选项A] 留在大厅(后续叙事模式：正常)\n[选项B] 离开大厅(后续叙事模式:NSFW)(结束章节)')
+
+    expect(parsed.choices[0]?.targetContentMode).toBe('normal')
+    expect(parsed.choices[1]?.targetContentMode).toBe('nsfw')
   })
 
   it('extracts character status lines, filters unknown names, and keeps the last update', () => {

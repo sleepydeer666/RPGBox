@@ -189,10 +189,12 @@ describe('chapter turn tracking', () => {
     const choices = [
       { id: 'A', text: '继续探索' },
       { id: 'B', text: '返回城镇（结束章节）' },
+      { id: 'C', text: '留在原地(结束章节)' },
     ]
 
     expect(selectedChoiceEndsChapter(choices, ['A'])).toBe(false)
     expect(selectedChoiceEndsChapter(choices, ['B'])).toBe(true)
+    expect(selectedChoiceEndsChapter(choices, ['C'])).toBe(true)
   })
 
   it('accepts a model-proposed chapter name only in an authorized naming turn', () => {

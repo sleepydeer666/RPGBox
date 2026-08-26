@@ -73,11 +73,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .builder-mode-row input[type='color'] { width: 100%; height: 40px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: #131512; cursor: pointer; }
 .builder-toggle { width: max-content; display: grid; grid-template-columns: 38px auto; align-items: center; gap: 10px; cursor: pointer; }
 .builder-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.builder-toggle > span { width: 38px; height: 21px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 11px; background: #111310; }
-.builder-toggle > span::after { content: ''; width: 15px; height: 15px; border-radius: 50%; background: var(--muted); display: block; transition: transform 140ms ease; }
-.builder-toggle input:checked + span { border-color: #478978; background: rgba(99, 185, 165, .18); }
-.builder-toggle input:checked + span::after { transform: translateX(17px); background: var(--teal); }
+.builder-toggle > span:not(.builder-toggle-copy) { width: 38px; height: 21px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 11px; background: #111310; }
+.builder-toggle > span:not(.builder-toggle-copy)::after { content: ''; width: 15px; height: 15px; border-radius: 50%; background: var(--muted); display: block; transition: transform 140ms ease; }
+.builder-toggle input:checked + span:not(.builder-toggle-copy) { border-color: #478978; background: rgba(99, 185, 165, .18); }
+.builder-toggle input:checked + span:not(.builder-toggle-copy)::after { transform: translateX(17px); background: var(--teal); }
 .builder-toggle strong { font-size: 12px; }
+.builder-toggle-copy { display: grid; gap: 3px; }
+.builder-toggle-copy small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 
 .cast-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .cast-tabs { min-width: 0; display: flex; flex-wrap: wrap; gap: 7px; }

@@ -59,6 +59,7 @@ const DEFAULT_RPG: RpgDraftSettings = {
   recommendedChapterTurnsEnabled: false,
   recommendedChapterTurns: 20,
   statusRulesPrompt: '',
+  clearStatusBarAfterChapter: true,
   nsfwScenePrompt: '',
   worldSettingPrompt: '',
   openingMessage: '',
@@ -215,6 +216,7 @@ export default function BuilderApp() {
             <div className="form-grid"><Field label="章节开始时选项数"><input type="number" min="4" max="10" value={rpg.newStoryChoiceCount} onChange={(event) => setRpg({ ...rpg, newStoryChoiceCount: Number(event.target.value) })} /></Field><Field label="单章节推荐对话数"><input type="number" min="10" max="30" disabled={!rpg.recommendedChapterTurnsEnabled} value={rpg.recommendedChapterTurns} onChange={(event) => setRpg({ ...rpg, recommendedChapterTurns: Number(event.target.value) })} /></Field></div>
             <Toggle checked={rpg.recommendedChapterTurnsEnabled} onChange={(recommendedChapterTurnsEnabled) => setRpg({ ...rpg, recommendedChapterTurnsEnabled })} label="启用单章节推荐对话数" />
             <Field label="状态栏规则"><textarea value={rpg.statusRulesPrompt} onChange={(event) => setRpg({ ...rpg, statusRulesPrompt: event.target.value })} /></Field>
+            <Toggle checked={Boolean(rpg.clearStatusBarAfterChapter)} onChange={(clearStatusBarAfterChapter) => setRpg({ ...rpg, clearStatusBarAfterChapter })} label="章节结束后自动清空状态栏" description="取消勾选，章节结束后保留状态栏" />
             <section className="builder-subsection"><div className="builder-section-heading"><div><h2>叙事模式</h2><p>首个模式是新游戏和未指定状态的默认模式。模式名称会用于导入人物包时进行精确匹配。</p></div><button className="secondary-button" onClick={addMode}><Plus size={15} />新增模式</button></div>
             <div className="builder-mode-list">{normalizeNarrativeModes(rpg.narrativeModes).map((mode, index) => <section className="builder-mode-item" key={mode.id}>
               <div className="builder-mode-row"><span className="builder-mode-index">{index + 1}</span><Field label="模式名称"><input defaultValue={mode.name} onBlur={(event) => finishModeName(mode, event.target.value)} /></Field><Field label="标识颜色"><input type="color" value={mode.color} onChange={(event) => patchMode(mode.id, { color: event.target.value })} /></Field><button className="icon-danger" disabled={rpg.narrativeModes.length <= 1} onClick={() => deleteMode(mode.id)} title="删除模式"><Trash2 size={16} /></button></div>
@@ -368,6 +370,6 @@ function ScreenColorPicker({ stream, onSelect, onClose }: { stream: MediaStream;
 
 function EditorPage({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) { return <div className="editor-page"><div className="page-title"><span>{eyebrow}</span><h1>{title}</h1></div><div className="form-stack">{children}</div></div> }
 function Field({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) { return <label className="builder-field"><span>{label}{required && <i>*</i>}</span>{children}</label> }
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) { return <label className="builder-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span /><strong>{label}</strong></label> }
+function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (value: boolean) => void; label: string; description?: string }) { return <label className="builder-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span /><span className="builder-toggle-copy"><strong>{label}</strong>{description && <small>{description}</small>}</span></label> }
 function NavButton({ active, icon, label, badge, onClick }: { active: boolean; icon: ReactNode; label: string; badge?: number; onClick: () => void }) { return <button className={active ? 'active' : ''} onClick={onClick}>{icon}<span>{label}</span>{badge !== undefined && <small>{badge}</small>}</button> }
 function toMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }

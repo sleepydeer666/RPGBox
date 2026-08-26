@@ -8,13 +8,17 @@ describe('RPG state transitions', () => {
     { id: 'C', text: '返回大厅（后续叙事模式：正常）', targetContentMode: 'normal' as const },
   ]
 
-  it('parses only the standard next-mode marker', () => {
+  it('parses the next-mode marker with full-width or half-width punctuation', () => {
     expect(parseChoiceStateTransition('靠近她（后续叙事模式：NSFW）')).toBe('nsfw')
     expect(parseChoiceStateTransition('返回大厅（后续叙事模式：正常）（结束章节）')).toBe('normal')
+    expect(parseChoiceStateTransition('靠近她(后续叙事模式：NSFW)')).toBe('nsfw')
+    expect(parseChoiceStateTransition('返回大厅(后续叙事模式:正常)(结束章节)')).toBe('normal')
+    expect(parseChoiceStateTransition('靠近她（后续叙事模式：NSFW)')).toBe('nsfw')
     expect(parseChoiceStateTransition('靠近她（后续状态：NSFW）')).toBeUndefined()
     expect(parseChoiceStateTransition('靠近她（状态切换：NSFW）')).toBeUndefined()
     expect(parseChoiceStateTransition('提到（状态切换：NSFW）但不切换')).toBeUndefined()
     expect(choiceActionText('返回大厅（后续叙事模式：正常）（结束章节）')).toBe('返回大厅')
+    expect(choiceActionText('返回大厅(后续叙事模式:正常)(结束章节)')).toBe('返回大厅')
   })
 
   it('uses lock, then the earliest selected transition, then the current state', () => {

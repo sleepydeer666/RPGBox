@@ -235,6 +235,7 @@ function exportSettings(game: GameSession): Record<string, unknown> {
     recommendedChapterTurnsEnabled: game.recommendedChapterTurnsEnabled ?? false,
     recommendedChapterTurns: game.recommendedChapterTurns ?? 20,
     statusRulesPrompt: game.statusRulesPrompt ?? '',
+    clearStatusBarAfterChapter: game.clearStatusBarAfterChapter ?? true,
     worldSettingPrompt: game.worldSettingPrompt,
     messages: game.messages,
     gameState: game.gameState,
@@ -245,7 +246,7 @@ function exportSettings(game: GameSession): Record<string, unknown> {
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'narrativeModes', 'newStoryChoiceCount', 'storyStylePrompt', 'modeStoryStylePrompts', 'chapterTransitionRules', 'narrativeModeRulesPrompt', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'nsfwScenePrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const allowed = ['systemPrompt', 'narrativeModes', 'newStoryChoiceCount', 'storyStylePrompt', 'modeStoryStylePrompts', 'chapterTransitionRules', 'narrativeModeRulesPrompt', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'clearStatusBarAfterChapter', 'nsfwScenePrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
   const imported = Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
   if (settings.newStoryChoiceCount !== undefined) {
     const parsed = Number(settings.newStoryChoiceCount)

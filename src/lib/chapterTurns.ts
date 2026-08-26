@@ -1,6 +1,7 @@
 import type { Choice, GameSession } from '../types'
 
 export const CHAPTER_END_MARKER = '（结束章节）'
+export const CHAPTER_END_MARKER_PATTERN = /[（(]结束章节[）)]/u
 export const CHAPTER_ENDING_CHOICE_INSTRUCTION = `至少一个选项还必须在后续叙事模式标签之后标记${CHAPTER_END_MARKER}。`
 export const CHAPTER_CONTINUE_INSTRUCTION = '当前尽量不要生成章节结束的选项，保持故事推进。'
 export const PREFER_EROTIC_CHOICES_INSTRUCTION = '选项内容优先推动向色情方向发展。'
@@ -64,7 +65,7 @@ export function buildChapterProgressInstruction(
 
 export function selectedChoiceEndsChapter(choices: Choice[], selectedChoiceIds: string[]): boolean {
   const selectedIds = new Set(selectedChoiceIds.map((id) => id.toUpperCase()))
-  return choices.some((choice) => selectedIds.has(choice.id.toUpperCase()) && choice.text.includes(CHAPTER_END_MARKER))
+  return choices.some((choice) => selectedIds.has(choice.id.toUpperCase()) && CHAPTER_END_MARKER_PATTERN.test(choice.text))
 }
 
 export function acceptNewChapterTitle(value: string | undefined, authorized: boolean): string | undefined {

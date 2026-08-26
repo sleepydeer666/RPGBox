@@ -49,7 +49,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   const [roleNotice, setRoleNotice] = useState('')
   const [roleImportMode, setRoleImportMode] = useState<RoleImportMode | null>(null)
   const cloneGame = games.find((item) => item.id === cloneGameId) ?? game
-  const cloneCandidates = cloneGame.characters.filter((character) => character.role === 'npc')
+  const cloneCandidates = cloneGame.characters
   const selectedProvider = providers.find((provider) => provider.id === game.aiSettings.providerId) ?? providers[0]
   const selectedCharacter = game.characters.find((character) => character.id === selectedCharacterId) ?? game.characters[0]
   const narrativeModes = normalizeNarrativeModes(game.narrativeModes)
@@ -174,7 +174,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
         createNpc()
       } else if (addCharacterMode === 'clone') {
         const source = cloneCandidates.find((character) => character.id === cloneCharacterId)
-        if (!source) throw new Error('请选择要克隆的 NPC')
+        if (!source) throw new Error('请选择要克隆的角色')
         const id = createNpcId()
         const clone = structuredClone(source)
         clone.id = id
@@ -404,7 +404,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
           {tab === 'rules' && <section className="game-tab-panel">
             <div className="form-section"><h3>章节切换规则</h3><p className="form-section-description">设置章节结束、过渡和新章节开启时需要遵守的额外规则。内容会在新游戏开始或章节切换时附加到本轮用户指令。</p><textarea className="game-prompt-textarea" value={game.chapterTransitionRules ?? ''} onChange={(event) => patchGame({ chapterTransitionRules: event.target.value })} placeholder="例如：章节结束前收束当前矛盾；新章节应延续既有角色关系和状态……" /><ParameterSlider label="章节开始时选项数" min={4} max={10} step={1} precision={0} value={game.newStoryChoiceCount ?? 4} onChange={(newStoryChoiceCount) => patchGame({ newStoryChoiceCount })} /><ParameterSlider label="每章节推荐对话轮数（到达此轮数则优先生成结束选项。如不想激活，可将滚动条拖至最左）" min={RECOMMENDED_CHAPTER_TURNS_DISABLED} max={30} step={1} precision={0} value={game.recommendedChapterTurnsEnabled ? Math.min(30, Math.max(10, game.recommendedChapterTurns ?? 20)) : RECOMMENDED_CHAPTER_TURNS_DISABLED} valueLabel={game.recommendedChapterTurnsEnabled ? undefined : '未激活'} onChange={(value) => patchGame(value === RECOMMENDED_CHAPTER_TURNS_DISABLED ? { recommendedChapterTurnsEnabled: false } : { recommendedChapterTurnsEnabled: true, recommendedChapterTurns: value })} /></div>
             <div className="form-section"><h3>叙事模式切换规则</h3><p className="form-section-description">描述不同叙事模式之间的切换条件，以及不同章节或剧情内容应采用的叙事模式。此规则会始终注入提示词。</p><textarea className="game-prompt-textarea" value={game.narrativeModeRulesPrompt ?? ''} onChange={(event) => patchGame({ narrativeModeRulesPrompt: event.target.value })} placeholder="例如：日常章节使用正常模式；进入亲密情节前通过选项切换至 NSFW 模式……" /></div>
-            <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /></div>
+            <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /><label className="setting-toggle"><input type="checkbox" checked={game.clearStatusBarAfterChapter ?? true} onChange={(event) => patchGame({ clearStatusBarAfterChapter: event.target.checked })} /><span><strong>章节结束后自动清空状态栏</strong><small>取消勾选，章节结束后保留状态栏</small></span></label></div>
             <div className="form-section"><h3>记忆规则</h3><p className="form-section-description">记忆和角色经历的内容、生成规则可在 RPG 主界面的“记忆”标签下查看。关闭功能不会删除已有内容。</p>
               {([['chapterMemoryEnabled', '启用章节记忆', '每章结束后整理本章剧情，保留最近章节的摘要。'], ['distantMemoryEnabled', '启用远期记忆', '章节摘要超出保留上限时，将较早章节压缩为长期事实。'], ['characterExperienceEnabled', '启用角色经历', '章节结束后，基于该章章节记忆按出场比例整理角色的重要事件与关系变化。']] as const).map(([key, label, description]) => <label className="setting-toggle" key={key}><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory)[key])} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), [key]: event.target.checked } })} /><span><strong>{label}</strong><small>{description}</small></span></label>)}
             </div>

@@ -33,6 +33,7 @@ export interface RpgDraftSettings {
   recommendedChapterTurnsEnabled: boolean
   recommendedChapterTurns: number
   statusRulesPrompt: string
+  clearStatusBarAfterChapter?: boolean
   nsfwScenePrompt: string
   worldSettingPrompt: string
   openingMessage: string
@@ -227,6 +228,7 @@ export async function readRpgPackage(file: File): Promise<ImportedRpgDraft> {
       recommendedChapterTurnsEnabled: Boolean(sourceSettings.recommendedChapterTurnsEnabled),
       recommendedChapterTurns: numberValue(sourceSettings.recommendedChapterTurns),
       statusRulesPrompt: stringValue(sourceSettings.statusRulesPrompt),
+      clearStatusBarAfterChapter: sourceSettings.clearStatusBarAfterChapter === undefined ? true : Boolean(sourceSettings.clearStatusBarAfterChapter),
       nsfwScenePrompt: sections.nsfw?.nsfwScenePrompt ?? '',
       worldSettingPrompt: stringValue(sourceSettings.worldSettingPrompt),
       openingMessage: isRecord(openingMessage) ? stringValue(openingMessage.content) : '',
@@ -286,11 +288,12 @@ export async function buildRpgPackage(settings: RpgDraftSettings, player: Charac
       recommendedChapterTurnsEnabled: settings.recommendedChapterTurnsEnabled,
       recommendedChapterTurns: clamp(settings.recommendedChapterTurns, 10, 30),
       statusRulesPrompt: settings.statusRulesPrompt,
+      clearStatusBarAfterChapter: settings.clearStatusBarAfterChapter ?? true,
       worldSettingPrompt: settings.worldSettingPrompt,
       messages: [{ id: openingId, role: 'assistant', content: settings.openingMessage || '新的旅程尚未留下文字。', createdAt: now }],
       gameState: { location: settings.location, time: settings.time, contentMode: defaultModeId, values: {} },
       narrative: { chapter: { id: `chapter-${now}`, title: settings.chapterTitle, startedAtMessageId: openingId } },
-      memory: { historicalSummary: '', recentChapters: [], recentChapterLimit: 5 },
+      memory: { historicalSummary: '', recentChapters: [], archivedChapters: [], recentChapterLimit: 5 },
       rollbackLog: [],
     } satisfies Partial<GameSession>,
     characters: serializedCharacters,

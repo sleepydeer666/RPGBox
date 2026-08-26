@@ -39,7 +39,7 @@ export function buildTurnOutputContract(
     : '第一行必须输出完整“[状态] 地点：地点；时间：时间；在场人物：姓名列表”。如果本轮剧情中地点、时间或在场人物发生变化，必须在变化生效处、后续剧情之前再次输出一行完整[状态]；每条新状态都只描述变化后的完整当前状态并作用于其后的内容。'
   return `【本轮输出契约】
 ${continuation ? '这是上一条回复的续写，只输出缺失部分，不得重复已完成剧情或已完成选项。' : ''}每行只输出一种类型。${stateTimelineRule}
-剧情使用“[旁白] 内容”或“角色名（立绘标签）：台词”；未说出口的内心活动写成“角色名（立绘标签）：（内心活动）”，不得写入旁白；最后输出选项。角色名必须与登场人物一致，立绘标签必须从下列该角色本轮可用的角色立绘中原样选择一个。
+剧情使用“[旁白] 内容”或“角色名（立绘标签）：台词”；如果角色的本轮可用立绘为“无”，必须改用“角色名：台词”，不得把“无”写成立绘标签。未说出口的内心活动使用对应的台词格式并将内容写在括号内，不得写入旁白；最后输出选项。角色名必须与登场人物一致；有可用立绘时，立绘标签必须从下列该角色本轮可用的角色立绘中原样选择一个。
 ${modeSwitchRule}
 选项格式：${optionFormats}；每个选项必须且只能有一个后续叙事模式标签，标签必须位于选项末尾。${chapterEndRule}
 ${statusRulesEnabled ? '选项结束后，为本轮参与互动的每个角色输出角色状态栏“[角色名]状态：状态内容”，之后不得继续输出。' : '选项之后不得继续输出剧情或解释。'}
@@ -163,6 +163,31 @@ export function buildRpgTurnDebugSegments(
   if (input) segments.push({ title: '本轮玩家输入', role: input.role, content: input.content })
   if (contract) segments.push({ title: '本轮输出契约', role: contract.role, content: contract.content })
   return segments
+}
+
+export const FORMAT_REPAIR_INSTRUCTION = '仔细阅读以上要求。不要输出任何思维过程，不要改变原文的故事内容，只检查并修复标签和各种格式问题，然后重新输出修正后的原文。'
+
+export function buildFormatRepairApiMessages(
+  requestSegments: DebugPromptSegment[],
+  originalInput: string,
+  rawResponse: string,
+) {
+  const ruleMessages = requestSegments.flatMap((segment) => {
+    if (segment.title.startsWith('历史') || segment.title === '本轮玩家输入') return []
+    if (segment.title === '本轮玩家输入与动态规则（兼容格式）') {
+      const inputPrefix = `${originalInput}\n\n`
+      const content = segment.content.startsWith(inputPrefix)
+        ? segment.content.slice(inputPrefix.length)
+        : segment.content
+      return content.trim() ? [{ role: segment.role, content }] : []
+    }
+    return segment.content.trim() ? [{ role: segment.role, content: segment.content }] : []
+  })
+  return [
+    ...ruleMessages,
+    { role: 'assistant' as const, content: rawResponse },
+    { role: 'user' as const, content: FORMAT_REPAIR_INSTRUCTION },
+  ]
 }
 
 export function buildTurnNarrativeContext(

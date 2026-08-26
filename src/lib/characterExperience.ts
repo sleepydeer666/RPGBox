@@ -15,7 +15,8 @@ export const CHARACTER_EXPERIENCE_SYSTEM_PROMPT = `你是 RPGBox 的角色经历
 10. 输出姓名必须与目标名单完全一致，不得使用昵称、代称或自行改名。
 11. 每行严格使用“[角色姓名]经历：融合后的完整角色经历”格式，正文不得换行。
 12. 每个角色控制在 1 至 3 个简短句子，只保留以后仍值得记住的关键信息；没有持久意义的细节不要写入。
-13. 只输出角色经历行，不输出前言、解释、Markdown、JSON、代码块或其他内容。输出顺序与目标名单一致。`
+13. 严禁输出思维过程、分析、草稿、前言、解释、拒绝语句或任何其他附加内容。
+14. 只输出最终角色经历行，不输出 Markdown、JSON、代码块或其他内容。输出顺序与目标名单一致。`
 
 export interface CharacterExperienceTarget {
   character: CharacterProfile
@@ -65,30 +66,54 @@ export function buildCharacterExperienceUserPrompt(
   return `章节名称：${chapterTitle}\n\n【需要更新经历的角色】\n${targetText}${extra}\n\n【本章记忆】\n${chapterSource}`
 }
 
-export function parseCharacterExperienceResponse(raw: string, targets: CharacterExperienceTarget[]): Record<string, string> {
+export interface ParsedCharacterExperienceResponse {
+  experiences: Record<string, string>
+  missingCharacterNames: string[]
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\[\]\\]/gu, '\\$&')
+}
+
+/**
+ * LLMs occasionally place several labelled results on one line (sometimes
+ * after a chain-of-thought prefix). Split only labels belonging to targets so
+ * the line parser can safely ignore the prefix and preserve each result.
+ */
+function normalizeCharacterExperienceResponse(raw: string, names: string[]): string {
+  const escapedNames = names
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+  if (!escapedNames.length) return raw
+  const namePattern = escapedNames.join('|')
+  const labelPattern = new RegExp(`(?:\\[?(?:${namePattern})\\]?\\s*(?:经历)?\\s*[：:])`, 'gu')
+  return raw.replace(labelPattern, (label, offset) => {
+    if (offset === 0) return label
+    const previous = raw[offset - 1]
+    return previous === '\n' || previous === '\r' ? label : `\n${label}`
+  })
+}
+
+export function parseCharacterExperienceResponse(raw: string, targets: CharacterExperienceTarget[]): ParsedCharacterExperienceResponse {
   const byName = new Map(targets.map(({ character }) => [character.name.trim(), character]))
   if (byName.size !== targets.length || [...byName.keys()].some((name) => !name)) throw new Error('目标角色姓名为空或重复')
   const results = new Map<string, string>()
-  const lines = raw.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
+  const normalized = normalizeCharacterExperienceResponse(raw, [...byName.keys()])
+  const lines = normalized.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
   for (const line of lines) {
-    const bracketed = line.match(/^(?:[-*]\s*)?\[([^\]\n]{1,30})\]\s*经历\s*[：:]\s*(.*)$/u)
-    const bareExperience = bracketed ? undefined : line.match(/^(?:[-*]\s*)?(.{1,30}?)\s*经历\s*[：:]\s*(.*)$/u)
-    const bareName = bracketed || bareExperience ? undefined : line.match(/^(?:[-*]\s*)?(.{1,30}?)\s*[：:]\s*(.*)$/u)
-    const match = bracketed ?? bareExperience ?? bareName
-    if (!match) continue
-    const returnedName = match[1].trim()
+    const separator = line.search(/[：:]/u)
+    if (separator < 0) continue
+    const rawName = line.slice(0, separator).replace(/^[-*]\s*/u, '').trim()
+    const returnedName = rawName.replace(/经历$/u, '').replace(/^\[(.+)\]$/u, '$1').trim()
     const character = byName.get(returnedName)
-    if (!character) {
-      if (bracketed || bareExperience) throw new Error(`角色经历返回了未知角色：${returnedName}`)
-      continue
-    }
-    if (results.has(character.id)) throw new Error(`角色经历重复返回：${character.name}`)
-    const experience = match[2].trim()
-    if (!experience) throw new Error(`角色经历内容为空：${character.name}`)
+    if (!character || results.has(character.id)) continue
+    const experience = line.slice(separator + 1).trim()
+    if (!experience) continue
     results.set(character.id, experience)
   }
   if (!results.size) throw new Error('角色经历返回中没有可识别的经历标签')
   const missing = targets.filter(({ character }) => !results.has(character.id)).map(({ character }) => character.name)
-  if (missing.length) throw new Error(`角色经历缺少：${missing.join('、')}`)
-  return Object.fromEntries(results)
+  return { experiences: Object.fromEntries(results), missingCharacterNames: missing }
 }

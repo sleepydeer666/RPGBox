@@ -114,6 +114,10 @@ export interface MemoryState {
   characterExperienceEnabled?: boolean
   currentChapterSummary?: string
   recentChapters?: ChapterMemory[]
+  /** Completed chapter memories waiting to be merged into distant memory. */
+  archivedChapters?: ChapterMemory[]
+  /** Archived chapter IDs not yet merged into distant memory. */
+  pendingDistantChapterIds?: string[]
   recentChapterLimit?: number
   historicalSummary: string
   chapterSummaryInstructions?: string
@@ -188,6 +192,7 @@ export interface GameSession {
   recommendedChapterTurnsEnabled?: boolean
   recommendedChapterTurns?: number
   statusRulesPrompt?: string
+  clearStatusBarAfterChapter?: boolean
   nsfwScenePrompt: string
   worldSettingPrompt: string
   characters: CharacterProfile[]

@@ -117,6 +117,48 @@ function findCharacter(context: ResponseParseContext, suppliedName: string) {
     : undefined
 }
 
+function parseDialogueLine(line: string, context: ResponseParseContext): StorySegment | undefined {
+  const playerDialogue = line.match(PLAYER_DIALOGUE_LINE_PATTERN)
+  const player = playerDialogue ? context.characters?.find((item) => item.role === 'player') : undefined
+  if (playerDialogue && player) {
+    return {
+      type: 'dialogue',
+      characterId: player.id,
+      characterName: player.name,
+      expression: '',
+      text: playerDialogue[2].trim(),
+    }
+  }
+
+  const bareDialogue = line.match(BARE_CHARACTER_DIALOGUE_LINE_PATTERN)
+  const bareCharacter = bareDialogue ? findCharacter(context, bareDialogue[1].trim()) : undefined
+  if (bareDialogue && bareCharacter) {
+    return {
+      type: 'dialogue',
+      characterId: bareCharacter.id,
+      characterName: bareCharacter.name,
+      expression: '',
+      text: bareDialogue[2].trim(),
+    }
+  }
+
+  const dialogue = line.match(DIALOGUE_LINE_PATTERN)
+  if (!dialogue) return undefined
+  const suppliedName = dialogue[1].trim()
+  const character = findCharacter(context, suppliedName)
+  return {
+    type: 'dialogue',
+    characterId: character?.id ?? suppliedName.toLocaleLowerCase().replace(/\s+/g, '-'),
+    characterName: character?.name ?? suppliedName,
+    expression: dialogue[2].trim(),
+    text: dialogue[3].trim(),
+  }
+}
+
+function isSegmentLine(line: string, context: ResponseParseContext): boolean {
+  return NARRATION_LINE_PATTERN.test(line) || Boolean(parseDialogueLine(line, context))
+}
+
 function normalizeMalformedDialogueLine(line: string, context: ResponseParseContext): string {
   const candidate = line.trim()
   const wrappedName = candidate.match(/^\[([^\]\n]+)\]([（(][^）)\n]{1,30}[）)]\s*[：:]\s*.+?)$/u)
@@ -168,12 +210,7 @@ function extractNarrativeModeSwitchIndexes(story: string, context: ResponseParse
       segmentIndex += 1
       continue
     }
-    const playerDialogue = line.match(PLAYER_DIALOGUE_LINE_PATTERN)
-    if (playerDialogue && context.characters?.some((item) => item.role === 'player')) {
-      segmentIndex += 1
-      continue
-    }
-    if (DIALOGUE_LINE_PATTERN.test(line)) segmentIndex += 1
+    if (parseDialogueLine(line, context)) segmentIndex += 1
   }
   return indexes
 }
@@ -211,41 +248,8 @@ function extractSimpleSegments(story: string, context: ResponseParseContext): St
       segments.push({ type: 'narration', text: narration[1].trim() })
       continue
     }
-    const playerDialogue = line.match(PLAYER_DIALOGUE_LINE_PATTERN)
-    const player = playerDialogue ? context.characters?.find((item) => item.role === 'player') : undefined
-    if (playerDialogue && player) {
-      segments.push({
-        type: 'dialogue',
-        characterId: player.id,
-        characterName: player.name,
-        expression: '',
-        text: playerDialogue[2].trim(),
-      })
-      continue
-    }
-    const bareDialogue = line.match(BARE_CHARACTER_DIALOGUE_LINE_PATTERN)
-    const bareCharacter = bareDialogue ? findCharacter(context, bareDialogue[1].trim()) : undefined
-    if (bareDialogue && bareCharacter) {
-      segments.push({
-        type: 'dialogue',
-        characterId: bareCharacter.id,
-        characterName: bareCharacter.name,
-        expression: '',
-        text: bareDialogue[2].trim(),
-      })
-      continue
-    }
-    const dialogue = line.match(DIALOGUE_LINE_PATTERN)
-    if (!dialogue) continue
-    const suppliedName = dialogue[1].trim()
-    const character = findCharacter(context, suppliedName)
-    segments.push({
-      type: 'dialogue',
-      characterId: character?.id ?? suppliedName.toLocaleLowerCase().replace(/\s+/g, '-'),
-      characterName: character?.name ?? suppliedName,
-      expression: dialogue[2].trim(),
-      text: dialogue[3].trim(),
-    })
+    const dialogue = parseDialogueLine(line, context)
+    if (dialogue) segments.push(dialogue)
   }
   return segments
 }
@@ -262,12 +266,7 @@ function extractChapterBoundaryIndexes(story: string, context: ResponseParseCont
       segmentCount += 1
       continue
     }
-    const playerDialogue = line.match(PLAYER_DIALOGUE_LINE_PATTERN)
-    if (playerDialogue && context.characters?.some((item) => item.role === 'player')) {
-      segmentCount += 1
-      continue
-    }
-    if (DIALOGUE_LINE_PATTERN.test(line)) segmentCount += 1
+    if (parseDialogueLine(line, context)) segmentCount += 1
   }
   return indexes
 }
@@ -332,7 +331,7 @@ function annotateSegmentState(segments: StorySegment[], story: string, context: 
   const bySegment: Array<Record<string, unknown> | undefined> = []
   for (const item of stateLines) {
     if (item.patch && Object.keys(item.patch).length) current = item.patch
-    if (NARRATION_LINE_PATTERN.test(item.line) || PLAYER_DIALOGUE_LINE_PATTERN.test(item.line) || DIALOGUE_LINE_PATTERN.test(item.line)) {
+    if (isSegmentLine(item.line, context)) {
       bySegment[segmentIndex++] = current
     }
   }
@@ -411,8 +410,7 @@ export function standardResponse(raw: string, context: ResponseParseContext = {}
       || isStateLine(line)
       || isProgressLine(line)
       || NARRATION_LINE_PATTERN.test(line)
-      || PLAYER_DIALOGUE_LINE_PATTERN.test(line)
-      || DIALOGUE_LINE_PATTERN.test(line)),
+      || Boolean(parseDialogueLine(line, context))),
   )
   return [...lines, ...(gameData ? [gameData] : [])].join('\n').trim()
 }
@@ -447,9 +445,8 @@ export function parseAssistantResponse(raw: string, context: ResponseParseContex
     .join('\n')
     .trim()
 
-  const parsedSegments = gameData?.segments?.length
-    ? gameData.segments
-    : extractSimpleSegments(story, context)
+  const textSegments = extractSimpleSegments(story, context)
+  const parsedSegments = textSegments.length ? textSegments : gameData?.segments ?? []
   const narrativeModeSwitchIndexes = extractNarrativeModeSwitchIndexes(story, context)
   const segments = annotateSegmentState(applyNarrativeModes(parsedSegments, context, narrativeModeSwitchIndexes), story, context)
   const chapterBoundaryIndexes = extractChapterBoundaryIndexes(story, context)

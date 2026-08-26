@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { completeStreamingLines, hasCompleteVisibleContent, reachedChapterBoundaryStart, resolvePlayback, resolvePlaybackContentMode } from './playback'
+import { completeStreamingLines, completedTurnPlaybackIndex, hasCompleteVisibleContent, isChoicePageVisible, parsePlaybackResponse, reachedChapterBoundaryStart, reconcilePlaybackIndex, resolvePlayback, resolvePlaybackContentMode, scenePresentationChanged } from './playback'
 
 describe('resolvePlayback', () => {
   it('does not follow newly streamed segments automatically', () => {
@@ -33,6 +33,97 @@ describe('completeStreamingLines', () => {
   it('hides the unfinished trailing line until a line break arrives', () => {
     expect(completeStreamingLines('[状态] 模式：常规；地点：旅店；时间：夜晚；场景：延续\n维纳斯（开心）：你')).toBe('[状态] 模式：常规；地点：旅店；时间：夜晚；场景：延续\n')
     expect(completeStreamingLines('维纳斯（开心）：你好\n')).toBe('维纳斯（开心）：你好\n')
+  })
+})
+
+describe('parsePlaybackResponse', () => {
+  const context = {
+    characters: [
+      { id: 'player', name: '亚瑟', role: 'player' as const, portraits: [] },
+      { id: 'npc-a', name: '角色A', role: 'npc' as const },
+    ],
+  }
+
+  it('uses the same dialogue grammar while streaming and after completion', () => {
+    const raw = [
+      '角色A（平静）：第一句。',
+      '亚瑟：中间一句。',
+      '角色A（平静）：第三句。',
+      '[选项A] 继续',
+    ].join('\n')
+    const streaming = parsePlaybackResponse(`${raw}\n`, context)
+    const completed = parsePlaybackResponse(raw, context, true)
+
+    expect(streaming.segments).toEqual(completed.segments)
+    expect(streaming.segments.map((segment) => segment.type === 'dialogue' ? segment.characterId : '')).toEqual([
+      'npc-a', 'player', 'npc-a',
+    ])
+  })
+
+  it('commits complete raw lines immediately and holds only the unfinished tail', () => {
+    const raw = '角色A（平静）：第一句。\n亚瑟：完整台词。\n角色A（平静）：尚未'
+    const streaming = parsePlaybackResponse(raw, context)
+
+    expect(streaming.segments.map((segment) => segment.text)).toEqual(['第一句。', '完整台词。'])
+    expect(parsePlaybackResponse(raw, context, true).segments.map((segment) => segment.text))
+      .toEqual(['第一句。', '完整台词。', '尚未'])
+  })
+})
+
+describe('reconcilePlaybackIndex', () => {
+  const narration = (text: string) => ({ type: 'narration' as const, text })
+
+  it('keeps the same visible segment when final parsing inserts an earlier segment', () => {
+    expect(reconcilePlaybackIndex(
+      [narration('第一段'), narration('当前段')],
+      [narration('第一段'), narration('补入段'), narration('当前段')],
+      1,
+    )).toBe(2)
+  })
+
+  it('uses the same occurrence when identical segments repeat', () => {
+    expect(reconcilePlaybackIndex(
+      [narration('重复'), narration('中间'), narration('重复')],
+      [narration('新增'), narration('重复'), narration('中间'), narration('重复')],
+      2,
+    )).toBe(3)
+  })
+
+  it('falls back to the nearest valid index when the visible segment disappears', () => {
+    expect(reconcilePlaybackIndex([narration('第一段'), narration('临时段')], [narration('第一段')], 1)).toBe(0)
+  })
+})
+
+describe('choice page playback', () => {
+  it('shows choices only after advancing past the final story segment', () => {
+    expect(isChoicePageVisible(false, 3, 2, 2)).toBe(false)
+    expect(isChoicePageVisible(false, 3, 2, 3)).toBe(true)
+    expect(isChoicePageVisible(true, 3, 2, 3)).toBe(false)
+  })
+
+  it('shows a choice-only response without requiring a nonexistent story page', () => {
+    expect(isChoicePageVisible(false, 0, 2, 0)).toBe(true)
+  })
+
+  it('restores completed turns to choices when available', () => {
+    expect(completedTurnPlaybackIndex(3, 2)).toBe(3)
+    expect(completedTurnPlaybackIndex(3, 0)).toBe(2)
+    expect(completedTurnPlaybackIndex(0, 0)).toBe(0)
+  })
+})
+
+describe('scene presentation changes', () => {
+  const segment = (location: string, presentCharacterIds: string[], time = '早晨') => ({
+    type: 'narration' as const,
+    text: '正文',
+    statePatch: { location, time, presentCharacterIds },
+    presentCharacterIds,
+  })
+
+  it('reacts to location or cast changes but ignores time and cast order', () => {
+    expect(scenePresentationChanged(segment('大厅', ['a', 'b']), segment('走廊', ['a', 'b']))).toBe(true)
+    expect(scenePresentationChanged(segment('大厅', ['a']), segment('大厅', ['a', 'b']))).toBe(true)
+    expect(scenePresentationChanged(segment('大厅', ['a', 'b']), segment('大厅', ['b', 'a'], '夜晚'))).toBe(false)
   })
 })
 

@@ -1,6 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import { buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnNarrativeContext, buildTurnNarrativeStyle, buildTurnOutputContract, buildTurnRequestContent, buildTurnRequestDebugContent, normalizeAssistantMessageForContext, takeRecentConversationTurns, toApiMessages } from './prompt'
+import { buildFormatRepairApiMessages, buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnNarrativeContext, buildTurnNarrativeStyle, buildTurnOutputContract, buildTurnRequestContent, buildTurnRequestDebugContent, FORMAT_REPAIR_INSTRUCTION, normalizeAssistantMessageForContext, takeRecentConversationTurns, toApiMessages } from './prompt'
 import type { ChatMessage } from '../types'
+
+describe('buildFormatRepairApiMessages', () => {
+  it('keeps the original rules and only the malformed response as conversation context', () => {
+    const messages = buildFormatRepairApiMessages([
+      { title: '固定系统规则', role: 'system', content: '固定规则' },
+      { title: '历史用户输入', role: 'user', content: '旧行动' },
+      { title: '历史剧情回复', role: 'assistant', content: '旧剧情' },
+      { title: '本轮叙事上下文与人物设定', role: 'system', content: '动态规则' },
+      { title: '本轮玩家输入', role: 'user', content: '向前走' },
+      { title: '本轮输出契约', role: 'system', content: '格式规则' },
+    ], '向前走', '错误格式原文')
+
+    expect(messages).toEqual([
+      { role: 'system', content: '固定规则' },
+      { role: 'system', content: '动态规则' },
+      { role: 'system', content: '格式规则' },
+      { role: 'assistant', content: '错误格式原文' },
+      { role: 'user', content: FORMAT_REPAIR_INSTRUCTION },
+    ])
+    expect(FORMAT_REPAIR_INSTRUCTION).toContain('不要输出任何思维过程')
+    expect(FORMAT_REPAIR_INSTRUCTION).toContain('不要改变原文的故事内容')
+    expect(FORMAT_REPAIR_INSTRUCTION).toContain('只检查并修复标签和各种格式问题')
+  })
+
+  it('removes the original player input from a compatible-format rule block', () => {
+    const messages = buildFormatRepairApiMessages([
+      { title: '固定系统规则', role: 'system', content: '固定规则' },
+      { title: '本轮玩家输入与动态规则（兼容格式）', role: 'user', content: '向前走\n\n动态规则\n\n格式规则' },
+    ], '向前走', '错误格式原文')
+
+    expect(messages.at(1)).toEqual({ role: 'user', content: '动态规则\n\n格式规则' })
+    expect(messages.some((message) => message.content === '向前走')).toBe(false)
+  })
+})
 
 describe('buildSystemPrompt', () => {
   it('keeps only stable client-owned rules and settings in the system prompt', () => {
@@ -249,7 +283,8 @@ describe('turn output contract', () => {
     expect(contract).toContain('- 莉亚：平静、微笑')
     expect(contract).toContain('- 守卫：无')
     expect(contract).not.toContain('- 莉亚：迷乱')
-    expect(contract).not.toContain('“无”是客户端保留的立绘标签')
+    expect(contract).toContain('如果角色的本轮可用立绘为“无”，必须改用“角色名：台词”')
+    expect(contract).toContain('不得把“无”写成立绘标签')
     expect(contract).toContain('第一行必须输出完整“[状态] 地点：地点；时间：时间；在场人物：姓名列表”')
     expect(contract).toContain('地点、时间或在场人物发生变化')
     expect(contract).toContain('在变化生效处、后续剧情之前再次输出一行完整[状态]')

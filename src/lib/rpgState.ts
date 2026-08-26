@@ -1,5 +1,5 @@
 import type { Choice, NarrativeMode, PortraitGroup } from '../types'
-import { CHAPTER_END_MARKER } from './chapterTurns'
+import { CHAPTER_END_MARKER_PATTERN } from './chapterTurns'
 import { availableNarrativeModes, DEFAULT_NARRATIVE_MODES, normalizeNarrativeModes } from './narrativeModes'
 
 export const CONTENT_MODE_LABELS: Record<string, string> = {
@@ -7,7 +7,7 @@ export const CONTENT_MODE_LABELS: Record<string, string> = {
   nsfw: 'NSFW',
 }
 
-const STATE_TRANSITION_PATTERN = /（后续叙事模式[：:]\s*([^（）\n]+?)\s*）(?=\s*(?:（结束章节）)?\s*$)/iu
+const STATE_TRANSITION_PATTERN = /[（(]后续叙事模式[：:]\s*([^（）()\n]+?)\s*[）)](?=\s*(?:[（(]结束章节[）)])?\s*$)/iu
 export const NARRATIVE_MODE_SWITCH_PATTERN = /^\s*\[叙事模式切换\]\s*(.+?)\s*$/u
 
 export function narrativeModeLabel(id: PortraitGroup, modes: NarrativeMode[] = DEFAULT_NARRATIVE_MODES): string {
@@ -23,7 +23,7 @@ export function parseChoiceStateTransition(text: string, modes: NarrativeMode[] 
 }
 
 export function choiceActionText(text: string): string {
-  return text.replace(STATE_TRANSITION_PATTERN, '').replace(CHAPTER_END_MARKER, '').replace(/\s{2,}/gu, ' ').trim()
+  return text.replace(STATE_TRANSITION_PATTERN, '').replace(CHAPTER_END_MARKER_PATTERN, '').replace(/\s{2,}/gu, ' ').trim()
 }
 
 export function narrativeModeSwitchLine(mode: PortraitGroup, modes: NarrativeMode[] = DEFAULT_NARRATIVE_MODES): string {

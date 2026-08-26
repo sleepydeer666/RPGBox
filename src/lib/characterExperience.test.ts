@@ -29,16 +29,12 @@ describe('character experience', () => {
     const prompt = buildCharacterExperienceUserPrompt('测试章', targets, '章节摘要正文', '关注承诺')
     expect(prompt).toContain('### A\n已有经历：旧经历')
     expect(prompt).toContain('### B\n已有经历：无')
-    expect(parseCharacterExperienceResponse('[A]经历：新经历A\n[B]经历：新经历B', targets)).toEqual({ a: '新经历A', b: '新经历B' })
-    expect(parseCharacterExperienceResponse('A经历：新经历A\nB经历：新经历B', targets)).toEqual({ a: '新经历A', b: '新经历B' })
-    expect(parseCharacterExperienceResponse('A：新经历A\nB: 新经历B', targets)).toEqual({ a: '新经历A', b: '新经历B' })
-    expect(parseCharacterExperienceResponse('以下是整理结果：\n\n[A]经历：新经历A\n\n[B]经历：新经历B\n整理完毕。', targets)).toEqual({ a: '新经历A', b: '新经历B' })
-    expect(() => parseCharacterExperienceResponse('[A]经历：新经历A', targets)).toThrow('角色经历缺少：B')
-    expect(() => parseCharacterExperienceResponse('[A]经历：一\n[A]经历：二\n[B]经历：三', targets)).toThrow('角色经历重复返回：A')
-    expect(() => parseCharacterExperienceResponse('[A]经历：一\n[C]经历：未知\n[B]经历：二', targets)).toThrow('角色经历返回了未知角色：C')
-    expect(() => parseCharacterExperienceResponse('A经历：一\nC经历：未知\nB经历：二', targets)).toThrow('角色经历返回了未知角色：C')
-    expect(() => parseCharacterExperienceResponse('A经历：\nB经历：二', targets)).toThrow('角色经历内容为空：A')
-    expect(parseCharacterExperienceResponse('以下是整理结果：\nA：一\n不相关说明：忽略\nB：二', targets)).toEqual({ a: '一', b: '二' })
+    expect(parseCharacterExperienceResponse('[A]经历：新经历A\n[B]经历：新经历B', targets).experiences).toEqual({ a: '新经历A', b: '新经历B' })
+    expect(parseCharacterExperienceResponse('A经历：新经历A\nB: 新经历B', targets).experiences).toEqual({ a: '新经历A', b: '新经历B' })
+    expect(parseCharacterExperienceResponse('[A]：新经历A\nA：重复\n[C]：未知\n[B]：新经历B', targets)).toEqual({ experiences: { a: '新经历A', b: '新经历B' }, missingCharacterNames: [] })
+    expect(parseCharacterExperienceResponse('[A]经历：新经历A', targets)).toEqual({ experiences: { a: '新经历A' }, missingCharacterNames: ['B'] })
+    expect(() => parseCharacterExperienceResponse('以下是说明，没有角色结果', targets)).toThrow('没有可识别')
+    expect(parseCharacterExperienceResponse('以下是整理结果：\nA：一\n不相关说明：忽略\nB：二', targets).experiences).toEqual({ a: '一', b: '二' })
   })
 
   it('explains aliases for the user-controlled character', () => {
@@ -46,5 +42,36 @@ describe('character experience', () => {
     const prompt = buildCharacterExperienceUserPrompt('测试章', [{ character: player, existingExperience: '' }], '本章摘要：司令官完成行动。')
     expect(prompt).toContain('“你”“我”“主角”“司令官”均可能指此角色')
     expect(prompt).toContain('【本章记忆】')
+  })
+
+  it('normalizes inline labels after a thinking prefix', () => {
+    const targets = [
+      { character: { ...characters[0], name: '居眠鹿', role: 'player' as const }, existingExperience: '' },
+      { character: characters[1], existingExperience: '' },
+    ]
+    const raw = '思考过程……最终整理如下：[居眠鹿]经历：主角完成任务。[B]经历：B与主角建立承诺。'
+    expect(parseCharacterExperienceResponse(raw, targets)).toEqual({
+      experiences: { a: '主角完成任务。', b: 'B与主角建立承诺。' },
+      missingCharacterNames: [],
+    })
+  })
+
+  it('keeps legacy labels and splits adjacent labels with ascii punctuation', () => {
+    const targets = [
+      { character: characters[0], existingExperience: '' },
+      { character: characters[1], existingExperience: '' },
+    ]
+    expect(parseCharacterExperienceResponse('A经历:经历A B：经历B', targets)).toEqual({
+      experiences: { a: '经历A', b: '经历B' },
+      missingCharacterNames: [],
+    })
+  })
+
+  it('does not let one result consume the next target label', () => {
+    const targets = [
+      { character: characters[0], existingExperience: '' },
+      { character: characters[1], existingExperience: '' },
+    ]
+    expect(parseCharacterExperienceResponse('[A]：第一段。[B]：第二段。', targets).experiences).toEqual({ a: '第一段。', b: '第二段。' })
   })
 })

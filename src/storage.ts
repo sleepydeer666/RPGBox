@@ -47,6 +47,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
     parsed.games = (parsed.games ?? []).map((game) => {
       const legacy = game as GameSession & {
         chapter?: string
+        preserveStatusBarAfterChapter?: boolean
         gameState: GameState & { focusCharacter?: string; expression?: string }
         memory: GameSession['memory'] & { summary?: string; turnsSinceSummary?: number }
       }
@@ -70,6 +71,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       recommendedChapterTurnsEnabled: legacy.recommendedChapterTurnsEnabled ?? false,
       recommendedChapterTurns: clampRecommendedChapterTurns(legacy.recommendedChapterTurns),
       statusRulesPrompt: legacy.statusRulesPrompt ?? '',
+      clearStatusBarAfterChapter: legacy.clearStatusBarAfterChapter ?? (legacy.preserveStatusBarAfterChapter === undefined ? true : !legacy.preserveStatusBarAfterChapter),
       nsfwScenePrompt: legacy.nsfwScenePrompt ?? '',
       worldSettingPrompt: legacy.worldSettingPrompt ?? '',
       characters: (legacy.characters?.length ? legacy.characters : createDefaultCharacters(legacy.gameState.focusCharacter)).map((character) => {
