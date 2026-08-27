@@ -7,6 +7,7 @@ import type { CharacterPortrait, CharacterProfile, GameSession, NarrativeMode, P
 import { formatPortraitTags, parsePortraitTags } from '../lib/portraitTags'
 import { hexToHsv, hsvToHex, normalizeHexColor, type HsvColor } from '../lib/color'
 import PortraitCropDialog from './PortraitCropDialog'
+import { DeferredInput, DeferredTextarea } from './DeferredFields'
 import { exportRolePackage, importRolePackage, inspectRolePackage, ROLE_PACKAGE_DIRECTORY_LABEL } from '../lib/rolePackage'
 import { adaptCharacterNarrativeModes, availableNarrativeModes, createNarrativeMode, defaultNarrativeModeId, normalizeNarrativeModes, removeNarrativeMode, uniqueNarrativeModeName } from '../lib/narrativeModes'
 
@@ -36,6 +37,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
   const [contextTurnsDraft, setContextTurnsDraft] = useState(String(game.aiSettings.contextTurns ?? 15))
   const [memoryLimitDraft, setMemoryLimitDraft] = useState(String(game.memory.recentChapterLimit ?? 5))
+  const [maxTokensDraft, setMaxTokensDraft] = useState(String(game.aiSettings.maxTokens))
   const [portraitTagDrafts, setPortraitTagDrafts] = useState<Record<string, string>>({})
   const [narrativeModeNameDrafts, setNarrativeModeNameDrafts] = useState<Record<string, string>>({})
   const [addCharacterOpen, setAddCharacterOpen] = useState(false)
@@ -87,6 +89,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
   useEffect(() => {
     setContextTurnsDraft(String(game.aiSettings.contextTurns ?? 15))
     setMemoryLimitDraft(String(game.memory.recentChapterLimit ?? 5))
+    setMaxTokensDraft(String(game.aiSettings.maxTokens))
     setPortraitTagDrafts({})
     setNarrativeModeNameDrafts({})
   }, [game.id])
@@ -113,12 +116,17 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     const recentChapterLimit = memoryLimitDraft.trim() && Number.isFinite(parsedMemoryLimit)
       ? clampRecentChapterLimit(parsedMemoryLimit)
       : 5
+    const parsedMaxTokens = Number(maxTokensDraft)
+    const maxTokens = maxTokensDraft.trim() && Number.isFinite(parsedMaxTokens)
+      ? Math.min(131072, Math.max(128, Math.round(parsedMaxTokens)))
+      : 10000
     setContextTurnsDraft(String(contextTurns))
     setMemoryLimitDraft(String(recentChapterLimit))
-    if (contextTurns !== game.aiSettings.contextTurns || recentChapterLimit !== game.memory.recentChapterLimit) {
+    setMaxTokensDraft(String(maxTokens))
+    if (contextTurns !== game.aiSettings.contextTurns || recentChapterLimit !== game.memory.recentChapterLimit || maxTokens !== game.aiSettings.maxTokens) {
       onChange({
         ...game,
-        aiSettings: { ...game.aiSettings, contextTurns },
+        aiSettings: { ...game.aiSettings, contextTurns, maxTokens },
         memory: { ...normalizeMemoryState(game.memory), recentChapterLimit },
         updatedAt: Date.now(),
       })
@@ -305,9 +313,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
 
   function editPortraitTags(character: CharacterProfile, portrait: CharacterPortrait, value: string) {
     const draftKey = `${character.id}:${portrait.id}`
-    const tags = parsePortraitTags(value)
     setPortraitTagDrafts((current) => ({ ...current, [draftKey]: value }))
-    patchPortrait(character, portrait.id, { tags, expression: tags[0] ?? '' })
   }
 
   function finishPortraitTagEdit(character: CharacterProfile, portrait: CharacterPortrait, value: string) {
@@ -394,7 +400,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <ParameterSlider label="Top P" min={0} max={1} step={0.05} value={game.aiSettings.topP} onChange={(topP) => patchGame({ aiSettings: { ...game.aiSettings, topP } })} />
               <ParameterSlider label="存在惩罚" min={-2} max={2} step={0.05} value={game.aiSettings.presencePenalty} onChange={(presencePenalty) => patchGame({ aiSettings: { ...game.aiSettings, presencePenalty } })} />
               <ParameterSlider label="频率惩罚" min={-2} max={2} step={0.05} value={game.aiSettings.frequencyPenalty} onChange={(frequencyPenalty) => patchGame({ aiSettings: { ...game.aiSettings, frequencyPenalty } })} />
-              <label>最大输出 Token<input type="number" min="128" max="131072" step="128" value={game.aiSettings.maxTokens} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, maxTokens: Math.max(128, Number(event.target.value)) } })} /></label>
+              <label>最大输出 Token<input type="number" min="128" max="131072" step="128" value={maxTokensDraft} onChange={(event) => setMaxTokensDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
               <label>对话轮数<input type="number" min="1" max="100" step="1" value={contextTurnsDraft} onChange={(event) => setContextTurnsDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
               <label>主记忆章节数<input type="number" min="1" max="20" step="1" value={memoryLimitDraft} onChange={(event) => setMemoryLimitDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
             </div>
@@ -402,9 +408,9 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
           </section>}
 
           {tab === 'rules' && <section className="game-tab-panel">
-            <div className="form-section"><h3>章节切换规则</h3><p className="form-section-description">设置章节结束、过渡和新章节开启时需要遵守的额外规则。内容会在新游戏开始或章节切换时附加到本轮用户指令。</p><textarea className="game-prompt-textarea" value={game.chapterTransitionRules ?? ''} onChange={(event) => patchGame({ chapterTransitionRules: event.target.value })} placeholder="例如：章节结束前收束当前矛盾；新章节应延续既有角色关系和状态……" /><ParameterSlider label="章节开始时选项数" min={4} max={10} step={1} precision={0} value={game.newStoryChoiceCount ?? 4} onChange={(newStoryChoiceCount) => patchGame({ newStoryChoiceCount })} /><ParameterSlider label="每章节推荐对话轮数（到达此轮数则优先生成结束选项。如不想激活，可将滚动条拖至最左）" min={RECOMMENDED_CHAPTER_TURNS_DISABLED} max={30} step={1} precision={0} value={game.recommendedChapterTurnsEnabled ? Math.min(30, Math.max(10, game.recommendedChapterTurns ?? 20)) : RECOMMENDED_CHAPTER_TURNS_DISABLED} valueLabel={game.recommendedChapterTurnsEnabled ? undefined : '未激活'} onChange={(value) => patchGame(value === RECOMMENDED_CHAPTER_TURNS_DISABLED ? { recommendedChapterTurnsEnabled: false } : { recommendedChapterTurnsEnabled: true, recommendedChapterTurns: value })} /></div>
-            <div className="form-section"><h3>叙事模式切换规则</h3><p className="form-section-description">描述不同叙事模式之间的切换条件，以及不同章节或剧情内容应采用的叙事模式。此规则会始终注入提示词。</p><textarea className="game-prompt-textarea" value={game.narrativeModeRulesPrompt ?? ''} onChange={(event) => patchGame({ narrativeModeRulesPrompt: event.target.value })} placeholder="例如：日常章节使用正常模式；进入亲密情节前通过选项切换至 NSFW 模式……" /></div>
-            <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><textarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onChange={(event) => patchGame({ statusRulesPrompt: event.target.value })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /><label className="setting-toggle"><input type="checkbox" checked={game.clearStatusBarAfterChapter ?? true} onChange={(event) => patchGame({ clearStatusBarAfterChapter: event.target.checked })} /><span><strong>章节结束后自动清空状态栏</strong><small>取消勾选，章节结束后保留状态栏</small></span></label></div>
+            <div className="form-section"><h3>章节切换规则</h3><p className="form-section-description">设置章节结束、过渡和新章节开启时需要遵守的额外规则。内容会在新游戏开始或章节切换时附加到本轮用户指令。</p><DeferredTextarea className="game-prompt-textarea" value={game.chapterTransitionRules ?? ''} onCommit={(chapterTransitionRules) => patchGame({ chapterTransitionRules })} placeholder="例如：章节结束前收束当前矛盾；新章节应延续既有角色关系和状态……" /><ParameterSlider label="章节开始时选项数" min={4} max={10} step={1} precision={0} value={game.newStoryChoiceCount ?? 4} onChange={(newStoryChoiceCount) => patchGame({ newStoryChoiceCount })} /><ParameterSlider label="每章节推荐对话轮数（到达此轮数则优先生成结束选项。如不想激活，可将滚动条拖至最左）" min={RECOMMENDED_CHAPTER_TURNS_DISABLED} max={30} step={1} precision={0} value={game.recommendedChapterTurnsEnabled ? Math.min(30, Math.max(10, game.recommendedChapterTurns ?? 20)) : RECOMMENDED_CHAPTER_TURNS_DISABLED} valueLabel={game.recommendedChapterTurnsEnabled ? undefined : '未激活'} onChange={(value) => patchGame(value === RECOMMENDED_CHAPTER_TURNS_DISABLED ? { recommendedChapterTurnsEnabled: false } : { recommendedChapterTurnsEnabled: true, recommendedChapterTurns: value })} /></div>
+            <div className="form-section"><h3>叙事模式切换规则</h3><p className="form-section-description">描述不同叙事模式之间的切换条件，以及不同章节或剧情内容应采用的叙事模式。此规则会始终注入提示词。</p><DeferredTextarea className="game-prompt-textarea" value={game.narrativeModeRulesPrompt ?? ''} onCommit={(narrativeModeRulesPrompt) => patchGame({ narrativeModeRulesPrompt })} placeholder="例如：日常章节使用正常模式；进入亲密情节前通过选项切换至 NSFW 模式……" /></div>
+            <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><DeferredTextarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onCommit={(statusRulesPrompt) => patchGame({ statusRulesPrompt })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /><label className="setting-toggle"><input type="checkbox" checked={game.clearStatusBarAfterChapter ?? true} onChange={(event) => patchGame({ clearStatusBarAfterChapter: event.target.checked })} /><span><strong>章节结束后自动清空状态栏</strong><small>取消勾选，章节结束后保留状态栏</small></span></label></div>
             <div className="form-section"><h3>记忆规则</h3><p className="form-section-description">记忆和角色经历的内容、生成规则可在 RPG 主界面的“记忆”标签下查看。关闭功能不会删除已有内容。</p>
               {([['chapterMemoryEnabled', '启用章节记忆', '每章结束后整理本章剧情，保留最近章节的摘要。'], ['distantMemoryEnabled', '启用远期记忆', '章节摘要超出保留上限时，将较早章节压缩为长期事实。'], ['characterExperienceEnabled', '启用角色经历', '章节结束后，基于该章章节记忆按出场比例整理角色的重要事件与关系变化。']] as const).map(([key, label, description]) => <label className="setting-toggle" key={key}><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory)[key])} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), [key]: event.target.checked } })} /><span><strong>{label}</strong><small>{description}</small></span></label>)}
             </div>
@@ -412,9 +418,9 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
           </section>}
 
           {tab === 'preferences' && <section className="game-tab-panel">
-            <div className="form-section"><h3>故事背景设定</h3><p className="form-section-description">设置世界观、时代、地点、势力、社会规则和故事开始前已经成立的背景事实。</p><textarea className="game-prompt-textarea" value={game.worldSettingPrompt} onChange={(event) => patchGame({ worldSettingPrompt: event.target.value })} placeholder="例如：世界结构、主要地区、阵营关系、特殊规则与故事前提……" /></div>
-            <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景设定</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><textarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onChange={(event) => patchGame({ nsfwScenePrompt: event.target.value })} placeholder="可留空；书写希望在相关情节中生效的偏好" /></div>
-            <div className="form-section narrative-style-section"><h3>叙事风格设定</h3><p className="form-section-description">全局设定始终生效；叙事模式设定仅在对应模式下与全局设定共同发送。</p><div className="narrative-style-tabs" role="tablist" aria-label="叙事风格设定范围"><button type="button" role="tab" aria-selected={selectedNarrativeStyleId === 'global'} className={selectedNarrativeStyleId === 'global' ? 'active' : ''} onClick={() => setSelectedNarrativeStyleId('global')}>全局设定</button>{availableModes.map((mode) => <button type="button" role="tab" aria-selected={selectedNarrativeStyleId === mode.id} className={selectedNarrativeStyleId === mode.id ? 'active' : ''} key={mode.id} onClick={() => setSelectedNarrativeStyleId(mode.id)}><span className="narrative-mode-dot" style={{ backgroundColor: mode.color }} />{mode.name}</button>)}</div><textarea className="game-prompt-textarea" value={selectedNarrativeStyleId === 'global' ? game.storyStylePrompt : game.modeStoryStylePrompts?.[selectedNarrativeStyleId] ?? ''} onChange={(event) => selectedNarrativeStyleId === 'global' ? patchGame({ storyStylePrompt: event.target.value }) : patchGame({ modeStoryStylePrompts: { ...game.modeStoryStylePrompts, [selectedNarrativeStyleId]: event.target.value } })} placeholder={selectedNarrativeStyleId === 'global' ? '设置全局剧情组织方式、文风、叙事视角、氛围、节奏、篇幅和描写偏好' : '填写当前叙事模式专用的叙事风格设定，可留空'} /></div>
+            <div className="form-section"><h3>故事背景设定</h3><p className="form-section-description">设置世界观、时代、地点、势力、社会规则和故事开始前已经成立的背景事实。</p><DeferredTextarea className="game-prompt-textarea" value={game.worldSettingPrompt} onCommit={(worldSettingPrompt) => patchGame({ worldSettingPrompt })} placeholder="例如：世界结构、主要地区、阵营关系、特殊规则与故事前提……" /></div>
+            <div className="form-section"><h3><span className="nsfw-mark">❤</span> 偏好的 NSFW 场景设定</h3><p className="form-section-description">单独设置成人情节的主题、氛围、节奏和内容偏好。留空时，这一部分不会加入系统提示词。</p><DeferredTextarea className="game-prompt-textarea" value={game.nsfwScenePrompt} onCommit={(nsfwScenePrompt) => patchGame({ nsfwScenePrompt })} placeholder="可留空；书写希望在相关情节中生效的偏好" /></div>
+            <div className="form-section narrative-style-section"><h3>叙事风格设定</h3><p className="form-section-description">全局设定始终生效；叙事模式设定仅在对应模式下与全局设定共同发送。</p><div className="narrative-style-tabs" role="tablist" aria-label="叙事风格设定范围"><button type="button" role="tab" aria-selected={selectedNarrativeStyleId === 'global'} className={selectedNarrativeStyleId === 'global' ? 'active' : ''} onClick={() => setSelectedNarrativeStyleId('global')}>全局设定</button>{availableModes.map((mode) => <button type="button" role="tab" aria-selected={selectedNarrativeStyleId === mode.id} className={selectedNarrativeStyleId === mode.id ? 'active' : ''} key={mode.id} onClick={() => setSelectedNarrativeStyleId(mode.id)}><span className="narrative-mode-dot" style={{ backgroundColor: mode.color }} />{mode.name}</button>)}</div><DeferredTextarea key={selectedNarrativeStyleId} className="game-prompt-textarea" value={selectedNarrativeStyleId === 'global' ? game.storyStylePrompt : game.modeStoryStylePrompts?.[selectedNarrativeStyleId] ?? ''} onCommit={(value) => selectedNarrativeStyleId === 'global' ? patchGame({ storyStylePrompt: value }) : patchGame({ modeStoryStylePrompts: { ...game.modeStoryStylePrompts, [selectedNarrativeStyleId]: value } })} placeholder={selectedNarrativeStyleId === 'global' ? '设置全局剧情组织方式、文风、叙事视角、氛围、节奏、篇幅和描写偏好' : '填写当前叙事模式专用的叙事风格设定，可留空'} /></div>
           </section>}
 
           {tab === 'characters' && <section className="character-settings-layout">
@@ -425,15 +431,15 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
             {selectedCharacter && <div className="character-editor">
               <div className="character-common-settings">
                 <div className="character-editor-head"><div><span className="eyebrow">通用设定</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
-                <div className="form-row"><label>姓名<input value={selectedCharacter.name} onChange={(event) => patchCharacter(selectedCharacter.id, { name: event.target.value })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
-                <div className="form-row"><label>性别<input value={selectedCharacter.gender} onChange={(event) => patchCharacter(selectedCharacter.id, { gender: event.target.value })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
-                <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><textarea className="character-description" value={selectedCharacter.description} onChange={(event) => patchCharacter(selectedCharacter.id, { description: event.target.value })} placeholder="填写人物的基础资料与角色设定" /></label>
-                {Boolean(game.statusRulesPrompt?.trim()) && <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><textarea className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { statusBar: event.target.value })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>}
+                <div className="form-row"><label>姓名<DeferredInput key={`${selectedCharacter.id}:name`} value={selectedCharacter.name} onCommit={(name) => patchCharacter(selectedCharacter.id, { name })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
+                <div className="form-row"><label>性别<DeferredInput key={`${selectedCharacter.id}:gender`} value={selectedCharacter.gender} onCommit={(gender) => patchCharacter(selectedCharacter.id, { gender })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
+                <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><DeferredTextarea key={`${selectedCharacter.id}:description`} className="character-description" value={selectedCharacter.description} onCommit={(description) => patchCharacter(selectedCharacter.id, { description })} placeholder="填写人物的基础资料与角色设定" /></label>
+                {Boolean(game.statusRulesPrompt?.trim()) && <label>状态栏<span className="field-description">角色的当前状态数据缓存；具体字段与更新方式由内置游戏规则决定</span><DeferredTextarea key={`${selectedCharacter.id}:status`} className="character-status-editor" value={selectedCharacter.statusBar ?? ''} onCommit={(statusBar) => patchCharacter(selectedCharacter.id, { statusBar })} placeholder="留空，后续可由状态栏规则设置和更新" /></label>}
               </div>
               <section className="character-mode-settings">
                 <div className="character-mode-heading"><div><span className="eyebrow">模式个性化设定</span><h3>{selectedCharacterMode?.name ?? '叙事模式'}</h3></div></div>
                 <div className="character-mode-tabs" role="tablist" aria-label="人物叙事模式">{availableModes.map((mode) => <button type="button" role="tab" aria-selected={mode.id === selectedModeId} className={mode.id === selectedModeId ? 'active' : ''} key={mode.id} onClick={() => setSelectedCharacterModeId(mode.id)}><span className="narrative-mode-dot" style={{ backgroundColor: mode.color }} />{mode.name}</button>)}</div>
-                <label>特殊设定<span className="field-description">仅在“{selectedCharacterMode?.name}”叙事模式下生效</span><textarea className="character-description" value={selectedCharacter.modeDescriptions?.[selectedModeId] ?? ''} onChange={(event) => patchCharacter(selectedCharacter.id, { modeDescriptions: { ...selectedCharacter.modeDescriptions, [selectedModeId]: event.target.value } })} placeholder="可留空；填写当前叙事模式专用的人物设定" /></label>
+                <label>特殊设定<span className="field-description">仅在“{selectedCharacterMode?.name}”叙事模式下生效</span><DeferredTextarea key={`${selectedCharacter.id}:${selectedModeId}:description`} className="character-description" value={selectedCharacter.modeDescriptions?.[selectedModeId] ?? ''} onCommit={(value) => patchCharacter(selectedCharacter.id, { modeDescriptions: { ...selectedCharacter.modeDescriptions, [selectedModeId]: value } })} placeholder="可留空；填写当前叙事模式专用的人物设定" /></label>
                 <div className="portrait-section-head"><div><h3>立绘与表情</h3><span>{selectedCharacter.portraits.length} 张</span></div><div className="portrait-toolbar"><label className="secondary-button"><ImagePlus size={15} />添加立绘<input type="file" accept="image/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setCropTarget({ characterId: selectedCharacter.id, file }); event.target.value = '' }} /></label><button type="button" className="secondary-button" onClick={() => setPortraitManagerOpen(true)}><Trash2 size={15} />删除立绘</button></div></div>
                 {portraitError && <div className="inline-error">{portraitError}</div>}
                 {!sortedPortraits.length ? <div className="portrait-settings-empty">尚未添加立绘</div> : <div className="portrait-settings-list">{sortedPortraits.map((portrait) => {
@@ -488,7 +494,7 @@ function CharacterColorControl({ value, compact = false, onChange }: { value: st
   return <span className={`character-color-control ${compact ? 'compact' : ''}`}>
     <span className="color-input-row">
       <button type="button" className="color-swatch-button" style={{ backgroundColor: normalizeHexColor(value) }} onClick={() => setOpen((current) => !current)} aria-label="自定义主体颜色" aria-expanded={open} />
-      {!compact && <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={() => onChange(normalizeHexColor(value))} aria-label="主体颜色十六进制值" />}
+      {!compact && <DeferredInput value={value} onCommit={(nextValue) => onChange(normalizeHexColor(nextValue))} aria-label="主体颜色十六进制值" />}
     </span>
     {open && <span className="character-hsv-editor">
       <ColorChannel label="色相" value={hsv.h} max={359} background="linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" onChange={(h) => patchHsv({ h })} />

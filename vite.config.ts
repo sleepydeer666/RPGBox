@@ -19,11 +19,43 @@ function bundledDefaultPrompt() {
   }
 }
 
-function bundledRpgAssets(includePackages: boolean) {
+function onboardingPortraitAssets() {
+  const portraitDirectory = resolve(process.cwd(), '立绘资源/dotabyss/艾莉西亚')
+  const portraitNames = ['艾莉西亚_战斗服_微笑.png', '艾莉西亚_战斗服_羞耻.png']
+  return {
+    name: 'bundle-local-onboarding-portraits',
+    configureServer(server: { middlewares: { use: (handler: (request: { url?: string }, response: { statusCode: number; setHeader: (name: string, value: string) => void; end: (data?: Buffer) => void }, next: () => void) => void) => void } }) {
+      server.middlewares.use((request, response, next) => {
+        const name = request.url ? decodeURIComponent(request.url.replace(/^\/onboarding\//u, '')) : ''
+        if (!name || !portraitNames.includes(name)) {
+          next()
+          return
+        }
+        const sourcePath = resolve(portraitDirectory, name)
+        if (!existsSync(sourcePath)) {
+          response.statusCode = 404
+          response.end()
+          return
+        }
+        response.statusCode = 200
+        response.setHeader('Content-Type', 'image/png')
+        response.end(readFileSync(sourcePath))
+      })
+    },
+    generateBundle() {
+      for (const portraitName of portraitNames) {
+        const sourcePath = resolve(portraitDirectory, portraitName)
+        if (!existsSync(sourcePath)) continue
+        this.emitFile({ type: 'asset', fileName: `onboarding/${portraitName}`, source: readFileSync(sourcePath) })
+      }
+    },
+  }
+}
+
+function bundledRpgAssets(includePackages: boolean, sourceDirectory: string) {
   return {
     name: 'bundle-extracted-rpg-assets',
     async generateBundle() {
-      const sourceDirectory = resolve(process.cwd(), 'src/assets/default-rpg')
       const fileNames = includePackages && existsSync(sourceDirectory)
         ? readdirSync(sourceDirectory).filter((fileName) => fileName.toLowerCase().endsWith('.rpgbox')).sort()
         : []
@@ -79,9 +111,14 @@ function decodeXmlAttribute(value: string): string {
     .replace(/&amp;/gu, '&')
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const bundledRpgSourceDirectory = resolve(
+    process.cwd(),
+    mode === 'desktop' ? '默认RPG' : 'src/assets/default-rpg',
+  )
+  return ({
   base: './',
-  plugins: [react(), bundledDefaultPrompt(), bundledRpgAssets(mode !== 'web')],
+  plugins: [react(), bundledDefaultPrompt(), onboardingPortraitAssets(), bundledRpgAssets(mode !== 'web', bundledRpgSourceDirectory)],
   build: {
     rollupOptions: {
       input: {
@@ -94,4 +131,5 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     port: 5173,
   },
-}))
+  })
+})

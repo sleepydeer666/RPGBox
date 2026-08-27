@@ -50,6 +50,7 @@ capacitor.config.js
 
 # Local application data and exports
 artifacts/
+.desktop-data/
 *.rpgbox
 window-*.xml
 
@@ -59,6 +60,7 @@ defaultprompt.txt
 立绘资源/
 角色包/
 默认RPG/
+src/assets/default-rpg/
 参考系统提示词.txt
 scripts/import-current-rpg-portraits.ps1
 

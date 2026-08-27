@@ -1,9 +1,12 @@
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
-import { isAndroidRuntime } from '../platform/runtime'
+import { isAndroidRuntime, isDesktopRuntime } from '../platform/runtime'
 
 export async function savePortraitFile(gameId: string, characterId: string, file: File): Promise<string> {
   const dataUrl = await readAsDataUrl(file)
+  if (isDesktopRuntime()) {
+    return window.rpgboxDesktop!.savePortrait(gameId, characterId, file.name, dataUrl.slice(dataUrl.indexOf(',') + 1))
+  }
   if (!isAndroidRuntime()) return dataUrl
   const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
   const extension = file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png'
@@ -13,6 +16,10 @@ export async function savePortraitFile(gameId: string, characterId: string, file
 }
 
 export async function deletePortraitFile(uri: string): Promise<void> {
+  if (isDesktopRuntime() && uri.startsWith('rpgbox-data:')) {
+    await window.rpgboxDesktop!.deletePortrait(uri)
+    return
+  }
   if (!isAndroidRuntime() || uri.startsWith('data:') || uri.startsWith('blob:')) return
   try {
     await Filesystem.deleteFile({ path: uri })
@@ -24,6 +31,7 @@ export async function deletePortraitFile(uri: string): Promise<void> {
 export async function readPortraitBase64(uri: string): Promise<string> {
   if (uri.startsWith('data:')) return uri.slice(uri.indexOf(',') + 1)
   if (uri.startsWith('blob:')) return blobToBase64(await fetch(uri).then((response) => response.blob()))
+  if (isDesktopRuntime() && uri.startsWith('rpgbox-data:')) return window.rpgboxDesktop!.readPortrait(uri)
   const result = await Filesystem.readFile({ path: uri })
   if (typeof result.data === 'string') return result.data
   return blobToBase64(result.data)
@@ -31,6 +39,7 @@ export async function readPortraitBase64(uri: string): Promise<string> {
 
 export async function savePortraitBase64(gameId: string, characterId: string, data: string, extension = 'png'): Promise<string> {
   const safeExtension = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png'
+  if (isDesktopRuntime()) return window.rpgboxDesktop!.savePortrait(gameId, characterId, `portrait.${safeExtension}`, data)
   if (!isAndroidRuntime()) return `data:${mimeType(safeExtension)};base64,${data}`
   const path = `portraits/${safePart(gameId)}/${safePart(characterId)}/${Date.now()}-${Math.random().toString(16).slice(2)}.${safeExtension}`
   const result = await Filesystem.writeFile({ path, data, directory: Directory.Data, recursive: true })
@@ -42,7 +51,7 @@ export async function copyPortraitFile(uri: string, gameId: string, characterId:
 }
 
 export function portraitSource(uri: string): string {
-  return uri.startsWith('data:') || uri.startsWith('blob:') ? uri : Capacitor.convertFileSrc(uri)
+  return uri.startsWith('data:') || uri.startsWith('blob:') || uri.startsWith('rpgbox-data:') ? uri : Capacitor.convertFileSrc(uri)
 }
 
 function readAsDataUrl(file: File): Promise<string> {

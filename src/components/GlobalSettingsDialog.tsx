@@ -18,7 +18,10 @@ interface Props {
 const newId = () => `provider-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 export default function GlobalSettingsDialog(props: Props) {
-  const active = props.providers.find((provider) => provider.id === props.activeProviderId) ?? props.providers[0]
+  const [draftProviders, setDraftProviders] = useState(() => props.providers.map((provider) => ({ ...provider, models: [...provider.models] })))
+  const [draftActiveProviderId, setDraftActiveProviderId] = useState(props.activeProviderId)
+  const [draftGlobalJailbreakPrompt, setDraftGlobalJailbreakPrompt] = useState(props.globalJailbreakPrompt)
+  const active = draftProviders.find((provider) => provider.id === draftActiveProviderId) ?? draftProviders[0]
   const [remoteModels, setRemoteModels] = useState<string[] | null>(null)
   const [modelSearch, setModelSearch] = useState('')
   const [manualModel, setManualModel] = useState('')
@@ -38,20 +41,27 @@ export default function GlobalSettingsDialog(props: Props) {
   }, [active.id])
 
   function updateActive(patch: Partial<ProviderProfile>) {
-    props.onChangeProviders(props.providers.map((provider) => provider.id === active.id ? { ...provider, ...patch } : provider))
+    setDraftProviders((providers) => providers.map((provider) => provider.id === active.id ? { ...provider, ...patch } : provider))
   }
 
   function addProvider() {
-    const provider = { ...DEFAULT_PROVIDER, models: [...DEFAULT_PROVIDER.models], id: newId(), name: `备用 API ${props.providers.length}` }
-    props.onChangeProviders([...props.providers, provider])
-    props.onChangeActive(provider.id)
+    const provider = { ...DEFAULT_PROVIDER, models: [...DEFAULT_PROVIDER.models], id: newId(), name: `备用 API ${draftProviders.length}` }
+    setDraftProviders((providers) => [...providers, provider])
+    setDraftActiveProviderId(provider.id)
   }
 
   function removeProvider() {
-    if (props.providers.length === 1) return
-    const remaining = props.providers.filter((provider) => provider.id !== active.id)
-    props.onChangeProviders(remaining)
-    props.onChangeActive(remaining[0].id)
+    if (draftProviders.length === 1) return
+    const remaining = draftProviders.filter((provider) => provider.id !== active.id)
+    setDraftProviders(remaining)
+    setDraftActiveProviderId(remaining[0].id)
+  }
+
+  function finish() {
+    props.onChangeProviders(draftProviders)
+    props.onChangeActive(draftActiveProviderId)
+    props.onChangeGlobalJailbreakPrompt(draftGlobalJailbreakPrompt)
+    props.onClose()
   }
 
   async function loadRemoteModels() {
@@ -95,7 +105,7 @@ export default function GlobalSettingsDialog(props: Props) {
   }
 
   async function useDefaultPrompt() {
-    if (props.globalJailbreakPrompt.trim() && !window.confirm('这将删除现有提示词，是否继续？')) return
+    if (draftGlobalJailbreakPrompt.trim() && !window.confirm('这将删除现有提示词，是否继续？')) return
     setDefaultPromptLoading(true)
     setDefaultPromptError('')
     try {
@@ -104,7 +114,7 @@ export default function GlobalSettingsDialog(props: Props) {
         setDefaultPromptError('无法读取默认提示词')
         return
       }
-      props.onChangeGlobalJailbreakPrompt(prompt)
+      setDraftGlobalJailbreakPrompt(prompt)
     } finally {
       setDefaultPromptLoading(false)
     }
@@ -112,22 +122,22 @@ export default function GlobalSettingsDialog(props: Props) {
 
   return (
     <div className="modal-layer" role="dialog" aria-modal="true">
-      <button className="backdrop" onClick={props.onClose} aria-label="关闭" />
+      <button className="backdrop" onClick={finish} aria-label="关闭" />
       <section className="modal settings-modal">
-        <div className="modal-head"><div><span className="eyebrow">GLOBAL</span><h2>全局设置</h2></div><button className="icon-button" onClick={props.onClose} title="关闭"><X size={20} /></button></div>
+        <div className="modal-head"><div><span className="eyebrow">GLOBAL</span><h2>全局设置</h2></div><button className="icon-button" onClick={finish} title="关闭"><X size={20} /></button></div>
         <div className="settings-grid">
           <nav className="provider-nav">
-            {props.providers.map((provider) => <button className={provider.id === active.id ? 'active' : ''} key={provider.id} onClick={() => props.onChangeActive(provider.id)}><span className={provider.apiKey ? 'status-dot online' : 'status-dot'} />{provider.name}</button>)}
+            {draftProviders.map((provider) => <button className={provider.id === active.id ? 'active' : ''} key={provider.id} onClick={() => setDraftActiveProviderId(provider.id)}><span className={provider.apiKey ? 'status-dot online' : 'status-dot'} />{provider.name}</button>)}
             <button className="add-provider" onClick={addProvider}><Plus size={16} />添加 API</button>
           </nav>
           <div className="settings-content">
             <div className="form-section global-prompt-section">
               <div className="form-section-head"><h3>全局破限提示词</h3><button type="button" className="secondary-button compact" onClick={() => void useDefaultPrompt()} disabled={defaultPromptLoading}><RotateCcw size={14} />{defaultPromptLoading ? '读取中' : '使用默认设置'}</button></div>
-              <label>提示词<textarea value={props.globalJailbreakPrompt} onChange={(event) => props.onChangeGlobalJailbreakPrompt(event.target.value)} placeholder="对所有RPG生效的全局附加提示词" /></label>
+              <label>提示词<textarea value={draftGlobalJailbreakPrompt} onChange={(event) => setDraftGlobalJailbreakPrompt(event.target.value)} placeholder="对所有RPG生效的全局附加提示词" /></label>
               {defaultPromptError && <div className="inline-error">{defaultPromptError}</div>}
             </div>
             <div className="form-section">
-              <div className="form-section-head"><h3>API 配置</h3><button className="danger-icon" onClick={removeProvider} disabled={props.providers.length === 1} title="删除当前配置"><Trash2 size={17} /></button></div>
+              <div className="form-section-head"><h3>API 配置</h3><button className="danger-icon" onClick={removeProvider} disabled={draftProviders.length === 1} title="删除当前配置"><Trash2 size={17} /></button></div>
               <label>配置名称<input value={active.name} onChange={(event) => updateActive({ name: event.target.value })} /></label>
               <label>Base URL<input value={active.baseUrl} onChange={(event) => updateActive({ baseUrl: event.target.value })} autoCapitalize="none" /></label>
               <label>API Key<input type="password" value={active.apiKey} onChange={(event) => updateActive({ apiKey: event.target.value })} autoCapitalize="none" /></label>
@@ -141,7 +151,7 @@ export default function GlobalSettingsDialog(props: Props) {
             </div>
           </div>
         </div>
-        <div className="modal-footer"><span>这里只管理接口与可用模型</span><button className="primary-button" onClick={props.onClose}>完成</button></div>
+        <div className="modal-footer"><span>这里只管理接口与可用模型</span><button className="primary-button" onClick={finish}>完成</button></div>
       </section>
     </div>
   )

@@ -1,20 +1,22 @@
 {
   "name": "rpgbox",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
     "build:web": "tsc -p tsconfig.app.json --noEmit && vite build --mode web",
     "preview:web": "vite preview --host 0.0.0.0",
-    "build:builder:offline": "tsc -p tsconfig.app.json --noEmit && vite build --config vite.builder.config.ts && node tools/build-offline-builder.mjs",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && node --test electron/portable-storage.node-test.cjs",
     "android:sync": "pnpm build && cap sync android",
     "android:apk": "pnpm android:sync && cd android && gradlew.bat assembleDebug --no-daemon --max-workers=1",
     "android:release": "pnpm android:sync && cd android && gradlew.bat assembleRelease --no-daemon --max-workers=1",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "desktop:dev": "concurrently -k \"vite --mode desktop --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
+    "desktop:build": "tsc -p tsconfig.app.json --noEmit && vite build --mode desktop",
+    "desktop:dist": "pnpm desktop:build && electron-builder --win zip"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
@@ -34,7 +36,30 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "concurrently": "^9.2.1",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^8.0.3"
   },
-  "packageManager": "pnpm@11.16.0"
+  "packageManager": "pnpm@11.16.0",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "app.rpgbox.desktop",
+    "productName": "RPGBox",
+    "asar": true,
+    "directories": {
+      "output": "artifacts/desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": ["zip"],
+      "icon": "electron/assets/icon.ico",
+      "artifactName": "RPGBox-${version}-Windows-${arch}.zip"
+    }
+  }
 }

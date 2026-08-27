@@ -1,11 +1,12 @@
 import { Preferences } from '@capacitor/preferences'
-import { isAndroidRuntime } from './runtime'
+import { isAndroidRuntime, isDesktopRuntime } from './runtime'
 
 const DATABASE_NAME = 'rpgbox-web'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'state'
 
 export async function readStoredState(key: string): Promise<string | null> {
+  if (isDesktopRuntime()) return window.rpgboxDesktop!.readValue(key)
   if (isAndroidRuntime()) {
     const { value } = await Preferences.get({ key })
     return value
@@ -18,6 +19,10 @@ export async function readStoredState(key: string): Promise<string | null> {
 }
 
 export async function writeStoredState(key: string, value: string): Promise<void> {
+  if (isDesktopRuntime()) {
+    await window.rpgboxDesktop!.writeValue(key, value)
+    return
+  }
   if (isAndroidRuntime()) {
     await Preferences.set({ key, value })
     return
@@ -29,6 +34,14 @@ export async function writeStoredState(key: string, value: string): Promise<void
   await withStore('readwrite', async (store) => {
     await requestResult(store.put(value, key))
   })
+}
+
+export async function readLocalFlag(key: string): Promise<boolean> {
+  return (await readStoredState(key)) === 'true'
+}
+
+export async function writeLocalFlag(key: string): Promise<void> {
+  await writeStoredState(key, 'true')
 }
 
 function openDatabase(): Promise<IDBDatabase> {

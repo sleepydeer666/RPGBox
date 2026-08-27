@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import GameDrawer, { type GameDrawerProps } from './components/GameDrawer'
 import GameSettingsDialog from './components/GameSettingsDialog'
 import GlobalSettingsDialog from './components/GlobalSettingsDialog'
+import OnboardingGuide from './components/OnboardingGuide'
+import { DeferredTextarea } from './components/DeferredFields'
 import { createBlankGame } from './game'
 import { tokenizeCharacterNames, tokenizeNarrationText } from './lib/characterText'
 import { buildCharacterExperienceUserPrompt, CHARACTER_EXPERIENCE_SYSTEM_PROMPT, chapterExperienceTargets, parseCharacterExperienceResponse, type CharacterExperienceTarget } from './lib/characterExperience'
@@ -30,6 +32,7 @@ import { selectTurnPortraitCharacters } from './lib/turnPortraits'
 import { streamCompletion } from './services/openai'
 import type { CompletionUsage } from './services/openai'
 import { createInitialProviderState, loadState, saveState } from './storage'
+import { readLocalFlag, writeLocalFlag } from './platform/stateStore'
 import type { ChapterMemory, CharacterProfile, ChatMessage, Choice, DebugPromptSegment, GameSession, MemoryState, MemorySummaryDebugEntry, PortraitGroup, ProviderProfile, StorySegment } from './types'
 
 function newId(prefix: string) {
@@ -43,6 +46,7 @@ const EMPTY_LLM_SPECIAL_INSTRUCTIONS: LlmSpecialInstructions = {
   increaseLength: false,
   decreaseLength: false,
 }
+const ONBOARDING_PROMPT_SEEN_KEY = 'rpgbox-onboarding-prompt-seen-v1'
 
 function formatMemorySummaryDebug(
   label: string,
@@ -87,6 +91,9 @@ function App() {
   const [llmSpecialInstructionsOpen, setLlmSpecialInstructionsOpen] = useState(false)
   const [llmSpecialInstructions, setLlmSpecialInstructions] = useState<LlmSpecialInstructions>(EMPTY_LLM_SPECIAL_INSTRUCTIONS)
   const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
+  const [onboardingPromptOpen, setOnboardingPromptOpen] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [onboardingPromptSeen, setOnboardingPromptSeen] = useState<boolean | null>(null)
   const [viewedStatusCharacterId, setViewedStatusCharacterId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [continuingResponse, setContinuingResponse] = useState(false)
@@ -299,12 +306,17 @@ function App() {
         return [game.id, completedTurnPlaybackIndex(parsed.segments.length, parsed.choices.length)]
       })))
       setHydrated(true)
+      void readLocalFlag(ONBOARDING_PROMPT_SEEN_KEY).then(setOnboardingPromptSeen)
     })
   }, [])
 
   useEffect(() => {
     void listBundledRpgPresets().then(setBundledRpgPresets)
   }, [])
+
+  useEffect(() => {
+    if (hydrated && games.length > 0 && onboardingPromptSeen === false) setOnboardingPromptOpen(true)
+  }, [games.length, hydrated, onboardingPromptSeen])
 
   useEffect(() => {
     if (!autoMemoryFeedback) return
@@ -1547,6 +1559,7 @@ function App() {
       bundledRpgImportKeys,
       onImportBundledRpg: importPreset,
       onOpenSettings: () => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) },
+      onStartOnboarding: () => {},
     }
     return <><EmptyLibraryScreen loading={!hydrated} onOpenLibrary={() => setGameDrawerOpen(true)} drawerProps={drawerProps} />{globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}</>
   }
@@ -1554,15 +1567,15 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="icon-button" onClick={() => setGameDrawerOpen(true)} title="RPG目录"><Menu size={21} /></button>
+        <button className="icon-button" data-onboarding-target="menu" onClick={() => setGameDrawerOpen(true)} title="RPG目录"><Menu size={21} /></button>
         <div className="brand-block"><span className="brand">RPGBox</span><span className="chapter">{displayChapterTitle || '章节间过渡'} · {activeGame.title}</span></div>
         <div className="topbar-actions">
-          <button className="topbar-action-button" onClick={() => setGameSettingsOpen(true)} title={`RPG设置 · ${activeProvider?.model || activeProvider?.name || '未配置'}`}>{!hasUsableProvider && <span className="provider-warning-badge" aria-label="AI API 未完整配置">!</span>}<Server size={18} /><span>设置</span></button>
-          <button className="topbar-action-button" onClick={() => setHistoryOpen(true)} title="历史记录"><History size={18} /><span>历史</span></button>
-          <button className={`topbar-action-button memory-action-button ${autoMemoryInProgress ? 'memory-processing' : autoMemoryFeedback ? `memory-${autoMemoryFeedback.status}` : ''}`} key={autoMemoryInProgress ? 'memory-processing' : `memory-${autoMemoryFeedback?.key ?? 0}`} onClick={() => setMemoryOpen(true)} disabled={autoMemoryInProgress} title={autoMemoryInProgress ? '正在自动整理记忆' : autoMemoryFeedback?.status === 'error' ? '自动记忆整理存在失败，请查看错误提示' : '主记忆与远期记忆'}>{autoMemoryInProgress ? <Hourglass className="memory-processing-hourglass" size={18} /> : <Brain size={18} />}<span>记忆</span></button>
-          <button className="topbar-action-button" onClick={() => setRollbackConfirmOpen(true)} disabled={busy || Boolean(summarizingMemory) || !(activeGame.rollbackLog?.length)} title={`回滚上一轮（可用 ${activeGame.rollbackLog?.length ?? 0} / 5）`}><RotateCcw size={18} /><span>撤回</span></button>
-          <button className="topbar-action-button" onClick={() => setDebugOpen(true)} title="AI 原文 Debug"><Bug size={18} /><span>Debug</span></button>
-          <button className={`topbar-action-button ${Object.values(llmSpecialInstructions).some(Boolean) ? 'special-instructions-pending' : ''}`} onClick={() => setLlmSpecialInstructionsOpen(true)} disabled={busy} title="LLM特殊指令"><SlidersHorizontal size={18} /><span>指令</span></button>
+          <button className="topbar-action-button" data-onboarding-target="settings" onClick={() => setGameSettingsOpen(true)} title={`RPG设置 · ${activeProvider?.model || activeProvider?.name || '未配置'}`}>{!hasUsableProvider && <span className="provider-warning-badge" aria-label="AI API 未完整配置">!</span>}<Server size={18} /><span>设置</span></button>
+          <button className="topbar-action-button" data-onboarding-target="history" onClick={() => setHistoryOpen(true)} title="历史记录"><History size={18} /><span>历史</span></button>
+          <button className={`topbar-action-button memory-action-button ${autoMemoryInProgress ? 'memory-processing' : autoMemoryFeedback ? `memory-${autoMemoryFeedback.status}` : ''}`} data-onboarding-target="memory" key={autoMemoryInProgress ? 'memory-processing' : `memory-${autoMemoryFeedback?.key ?? 0}`} onClick={() => setMemoryOpen(true)} disabled={autoMemoryInProgress} title={autoMemoryInProgress ? '正在自动整理记忆' : autoMemoryFeedback?.status === 'error' ? '自动记忆整理存在失败，请查看错误提示' : '主记忆与远期记忆'}>{autoMemoryInProgress ? <Hourglass className="memory-processing-hourglass" size={18} /> : <Brain size={18} />}<span>记忆</span></button>
+          <button className="topbar-action-button" data-onboarding-target="rollback" onClick={() => setRollbackConfirmOpen(true)} disabled={busy || Boolean(summarizingMemory) || !(activeGame.rollbackLog?.length)} title={`回滚上一轮（可用 ${activeGame.rollbackLog?.length ?? 0} / 5）`}><RotateCcw size={18} /><span>撤回</span></button>
+          <button className="topbar-action-button" data-onboarding-target="debug" onClick={() => setDebugOpen(true)} title="AI 原文 Debug"><Bug size={18} /><span>Debug</span></button>
+          <button className={`topbar-action-button ${Object.values(llmSpecialInstructions).some(Boolean) ? 'special-instructions-pending' : ''}`} data-onboarding-target="instructions" onClick={() => setLlmSpecialInstructionsOpen(true)} disabled={busy} title="LLM特殊指令"><SlidersHorizontal size={18} /><span>指令</span></button>
         </div>
       </header>
 
@@ -1645,7 +1658,7 @@ function App() {
         </footer>
       </main>
 
-      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} />
+      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} onStartOnboarding={() => { setGameDrawerOpen(false); setOnboardingOpen(true) }} />
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
@@ -1653,6 +1666,8 @@ function App() {
       {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponseFormat()} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} actionsDisabled={busy || !activeProvider} onSummarize={summarizeMemoryNow} onSummarizeExperiences={summarizeCharacterExperiencesNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
+      {onboardingPromptOpen && <OnboardingPrompt onAnswer={(accepted) => { setOnboardingPromptSeen(true); setOnboardingPromptOpen(false); void writeLocalFlag(ONBOARDING_PROMPT_SEEN_KEY); if (accepted) setOnboardingOpen(true) }} />}
+      {onboardingOpen && <OnboardingGuide onFinish={() => setOnboardingOpen(false)} />}
     </div>
   )
 }
@@ -1773,27 +1788,27 @@ function MemoryDialog({ game, summarizing, actionsDisabled, onSummarize, onSumma
             <span className="memory-editor-head"><span className="memory-heading-group"><span>{primaryView === 'recent' ? <>主记忆 <small>{recent.length}/{memory.recentChapterLimit ?? 5}</small></> : <>已归档主记忆 <small>{archived.length}</small></>}</span>{archived.length > 0 && <button type="button" className="secondary-button compact memory-view-toggle" onClick={() => setPrimaryView((view) => view === 'recent' ? 'archived' : 'recent')}>{primaryView === 'recent' ? `查看已归档（${archived.length}）` : '返回主记忆'}</button>}</span>{primaryView === 'recent' && <button type="button" className="secondary-button compact" onClick={() => setPendingAction({ kind: 'chapter' })} disabled={Boolean(summarizing) || actionsDisabled || !currentTitle}><Brain size={14} />{summarizing === 'chapter' ? '总结中' : '总结当前章节'}</button>}</span>
             <p className="memory-capacity-note">{primaryView === 'recent' ? '这些记忆会随每次剧情请求发送。超出上限后，最早的章节会移入归档，并用于整理远期记忆。' : `这些记忆不会随剧情请求发送。${pendingArchivedCount ? `其中 ${pendingArchivedCount} 条正在等待整理进远期记忆。` : '当前归档均已整理进远期记忆。'}`}</p>
             <div className="recent-memory-list">
-              {primaryView === 'recent' && <>{currentTitle ? <div className="memory-entry"><div className="memory-entry-head"><span>当前：{currentTitle}</span>{hasCurrentMemory && <button type="button" className="danger-icon memory-delete-button" onClick={() => onChange({ ...memory, currentChapterSummary: '' })} title={`删除“${currentTitle}”的主记忆`} aria-label={`删除“${currentTitle}”的主记忆`}><Trash2 size={15} /></button>}</div><textarea aria-label={`${currentTitle}的当前章节记忆`} value={currentSummary} onChange={(event) => onChange({ ...memory, currentChapterSummary: event.target.value })} placeholder="当前章节尚未总结" /></div> : <div className="empty-memory">当前处于章节间过渡，不生成章节记忆。</div>}{recent.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title}</span><span className="memory-entry-actions"><button type="button" className="secondary-button compact" onClick={() => setPendingAction({ kind: 'chapter', chapter })} disabled={Boolean(summarizing) || actionsDisabled} title={`重新总结“${chapter.title}”`}><RefreshCw size={13} />{summarizing === chapter.id ? '总结中' : '重新总结'}</button><button type="button" className="danger-icon memory-delete-button" onClick={() => removeRecentChapter(chapter.id)} title={`删除“${chapter.title}”的主记忆`} aria-label={`删除“${chapter.title}”的主记忆`}><Trash2 size={15} /></button></span></div><textarea aria-label={`${chapter.title}的章节记忆`} value={chapter.summary} onChange={(event) => patchRecentChapter(chapter.id, event.target.value)} placeholder="自动总结失败时可手工编辑或重新总结" /></div>)}{!currentTitle && !recent.length && <div className="empty-memory">暂无主记忆。</div>}</>}
-              {primaryView === 'archived' && archived.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title} <small className={pendingArchivedIds.has(chapter.id) ? 'memory-archive-pending' : 'memory-archive-processed'}>{pendingArchivedIds.has(chapter.id) ? '等待整理' : '已整理进远期记忆'}</small></span><button type="button" className="danger-icon memory-delete-button" onClick={() => removeArchivedChapter(chapter.id)} title={`删除归档“${chapter.title}”`} aria-label={`删除归档“${chapter.title}”`}><Trash2 size={15} /></button></div><textarea aria-label={`${chapter.title}的归档主记忆`} value={chapter.summary} onChange={(event) => patchArchivedChapter(chapter.id, event.target.value)} /></div>)}
+              {primaryView === 'recent' && <>{currentTitle ? <div className="memory-entry"><div className="memory-entry-head"><span>当前：{currentTitle}</span>{hasCurrentMemory && <button type="button" className="danger-icon memory-delete-button" onClick={() => onChange({ ...memory, currentChapterSummary: '' })} title={`删除“${currentTitle}”的主记忆`} aria-label={`删除“${currentTitle}”的主记忆`}><Trash2 size={15} /></button>}</div><DeferredTextarea aria-label={`${currentTitle}的当前章节记忆`} value={currentSummary} onCommit={(currentChapterSummary) => onChange({ ...memory, currentChapterSummary })} placeholder="当前章节尚未总结" /></div> : <div className="empty-memory">当前处于章节间过渡，不生成章节记忆。</div>}{recent.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title}</span><span className="memory-entry-actions"><button type="button" className="secondary-button compact" onClick={() => setPendingAction({ kind: 'chapter', chapter })} disabled={Boolean(summarizing) || actionsDisabled} title={`重新总结“${chapter.title}”`}><RefreshCw size={13} />{summarizing === chapter.id ? '总结中' : '重新总结'}</button><button type="button" className="danger-icon memory-delete-button" onClick={() => removeRecentChapter(chapter.id)} title={`删除“${chapter.title}”的主记忆`} aria-label={`删除“${chapter.title}”的主记忆`}><Trash2 size={15} /></button></span></div><DeferredTextarea aria-label={`${chapter.title}的章节记忆`} value={chapter.summary} onCommit={(summary) => patchRecentChapter(chapter.id, summary)} placeholder="自动总结失败时可手工编辑或重新总结" /></div>)}{!currentTitle && !recent.length && <div className="empty-memory">暂无主记忆。</div>}</>}
+              {primaryView === 'archived' && archived.map((chapter) => <div className="memory-entry" key={chapter.id}><div className="memory-entry-head"><span>{chapter.title} <small className={pendingArchivedIds.has(chapter.id) ? 'memory-archive-pending' : 'memory-archive-processed'}>{pendingArchivedIds.has(chapter.id) ? '等待整理' : '已整理进远期记忆'}</small></span><button type="button" className="danger-icon memory-delete-button" onClick={() => removeArchivedChapter(chapter.id)} title={`删除归档“${chapter.title}”`} aria-label={`删除归档“${chapter.title}”`}><Trash2 size={15} /></button></div><DeferredTextarea aria-label={`${chapter.title}的归档主记忆`} value={chapter.summary} onCommit={(summary) => patchArchivedChapter(chapter.id, summary)} /></div>)}
             </div>
           </section>)}
-          {activeTab === 'distant' && (!memory.distantMemoryEnabled ? <div className="empty-memory">此功能未启用，请在“设置 → RPG规则 → 记忆规则”中启用。</div> : <label className="distant-memory-editor"><span className="memory-editor-head"><span>远期记忆</span><button type="button" className="secondary-button compact" onClick={() => setPendingAction({ kind: 'history' })} disabled={Boolean(summarizing) || actionsDisabled || (!memory.historicalSummary.trim() && !pendingArchivedCount)}><Brain size={14} />{summarizing ? '记忆处理中' : pendingArchivedCount ? `整理归档（${pendingArchivedCount}）` : '压缩现有内容'}</button></span><textarea value={memory.historicalSummary} onChange={(event) => onChange({ ...memory, historicalSummary: event.target.value })} placeholder="更早章节压缩后写入此处" /></label>)}
+          {activeTab === 'distant' && (!memory.distantMemoryEnabled ? <div className="empty-memory">此功能未启用，请在“设置 → RPG规则 → 记忆规则”中启用。</div> : <label className="distant-memory-editor"><span className="memory-editor-head"><span>远期记忆</span><button type="button" className="secondary-button compact" onClick={() => setPendingAction({ kind: 'history' })} disabled={Boolean(summarizing) || actionsDisabled || (!memory.historicalSummary.trim() && !pendingArchivedCount)}><Brain size={14} />{summarizing ? '记忆处理中' : pendingArchivedCount ? `整理归档（${pendingArchivedCount}）` : '压缩现有内容'}</button></span><DeferredTextarea value={memory.historicalSummary} onCommit={(historicalSummary) => onChange({ ...memory, historicalSummary })} placeholder="更早章节压缩后写入此处" /></label>)}
           {activeTab === 'experiences' && (!memory.characterExperienceEnabled ? <div className="empty-memory">此功能未启用，请在“设置 → RPG规则 → 记忆规则”中启用。</div> : <CharacterExperienceEditor game={game} memory={memory} summarizing={summarizing} onSummarize={onSummarizeExperiences} onChange={onChange} onRequestSummary={() => setPendingAction({ kind: 'experience' })} summaryOpen={experienceSummaryOpen} setSummaryOpen={setExperienceSummaryOpen} />)}
           {activeTab === 'rules' && <div className="memory-rules" aria-label="记忆整理规则">
             <section className="memory-rule-section">
               <h3>主记忆总结规则</h3>
               <div className="memory-default-rule"><span>内置系统提示词</span><div>{CHAPTER_SUMMARY_SYSTEM_PROMPT}</div></div>
-              <label><span>追加要求</span><textarea value={memory.chapterSummaryInstructions ?? ''} onChange={(event) => onChange({ ...memory, chapterSummaryInstructions: event.target.value })} placeholder="例如：重点保留主角与各角色的关系变化（可留空）" /></label>
+              <label><span>追加要求</span><DeferredTextarea value={memory.chapterSummaryInstructions ?? ''} onCommit={(chapterSummaryInstructions) => onChange({ ...memory, chapterSummaryInstructions })} placeholder="例如：重点保留主角与各角色的关系变化（可留空）" /></label>
             </section>
             <section className="memory-rule-section">
               <h3>角色经历整理规则</h3>
               <div className="memory-default-rule"><span>内置系统提示词</span><div>{CHARACTER_EXPERIENCE_SYSTEM_PROMPT}</div></div>
-              <label><span>追加要求</span><textarea value={memory.characterExperienceInstructions ?? ''} onChange={(event) => onChange({ ...memory, characterExperienceInstructions: event.target.value })} placeholder="例如：重点保留与主角的承诺和关系转折（可留空）" /></label>
+              <label><span>追加要求</span><DeferredTextarea value={memory.characterExperienceInstructions ?? ''} onCommit={(characterExperienceInstructions) => onChange({ ...memory, characterExperienceInstructions })} placeholder="例如：重点保留与主角的承诺和关系转折（可留空）" /></label>
             </section>
             <section className="memory-rule-section">
               <h3>远期记忆总结规则</h3>
               <div className="memory-default-rule"><span>内置系统提示词</span><div>{DISTANT_SUMMARY_SYSTEM_PROMPT}</div></div>
-              <label><span>追加要求</span><textarea value={memory.distantSummaryInstructions ?? ''} onChange={(event) => onChange({ ...memory, distantSummaryInstructions: event.target.value })} placeholder="例如：优先保留会影响后续选择的承诺与情报（可留空）" /></label>
+              <label><span>追加要求</span><DeferredTextarea value={memory.distantSummaryInstructions ?? ''} onCommit={(distantSummaryInstructions) => onChange({ ...memory, distantSummaryInstructions })} placeholder="例如：优先保留会影响后续选择的承诺与情报（可留空）" /></label>
             </section>
           </div>}
         </div>
@@ -1809,6 +1824,9 @@ function MemoryDialog({ game, summarizing, actionsDisabled, onSummarize, onSumma
   )
 }
 
+function OnboardingPrompt({ onAnswer }: { onAnswer: (accepted: boolean) => void }) {
+  return <div className="modal-layer onboarding-prompt-layer" role="alertdialog" aria-modal="true" aria-labelledby="onboarding-prompt-title"><button className="backdrop" onClick={() => onAnswer(false)} aria-label="暂不查看" /><section className="modal onboarding-prompt"><div className="modal-head"><div><span className="eyebrow">QUICK START</span><h2 id="onboarding-prompt-title">是否用30秒快速了解RPGBox？</h2></div></div><div className="onboarding-prompt-copy">艾莉西亚将带您快速认识主要功能。</div><div className="modal-footer"><span>之后可从RPG目录再次打开</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => onAnswer(false)}>否</button><button className="primary-button" onClick={() => onAnswer(true)}>是</button></div></div></section></div>
+}
 function MemoryActionConfirmDialog({ action, onCancel, onConfirm }: { action: { kind: 'chapter'; chapter?: ChapterMemory } | { kind: 'history' } | { kind: 'experience' }; onCancel: () => void; onConfirm: () => void }) {
   const experience = action.kind === 'experience'
   const title = experience ? '手工抽取经历' : action.kind === 'history' ? '压缩所有远期记忆？' : action.chapter ? `重新总结“${action.chapter.title}”？` : '总结当前章节？'
@@ -1854,7 +1872,7 @@ function CharacterExperienceEditor({ game, memory, summarizing, onSummarize, onC
       </div>}
       {!entries.length ? <div className="empty-memory">暂无角色经历，可从上方选择角色后手工添加。</div> : <div className="character-experience-content">
         <nav className="character-experience-tabs" aria-label="角色经历人物选择">{entries.map((character) => <button type="button" className={character.id === selectedId ? 'active' : ''} onClick={() => setSelectedId(character.id)} key={character.id}>{character.name}</button>)}</nav>
-        {selected && <label className="distant-memory-editor"><span className="memory-editor-head"><span>{selected.name}的角色经历</span></span><textarea value={characterExperience(memory, selected.id)} onChange={(event) => onChange({ ...memory, characterExperiences: { ...memory.characterExperiences, [selected.id]: event.target.value } })} placeholder="手工记录该角色的重要经历、承诺和关系变化" /></label>}
+        {selected && <label className="distant-memory-editor"><span className="memory-editor-head"><span>{selected.name}的角色经历</span></span><DeferredTextarea key={selected.id} value={characterExperience(memory, selected.id)} onCommit={(value) => onChange({ ...memory, characterExperiences: { ...memory.characterExperiences, [selected.id]: value } })} placeholder="手工记录该角色的重要经历、承诺和关系变化" /></label>}
       </div>}
     </div>
     {summaryOpen && <CharacterExperienceSummaryDialog chapters={availableChapters} characters={npcs} summarizing={summarizing} onCancel={() => setSummaryOpen(false)} onConfirm={async (chapter, characterIds) => { await onSummarize(chapter, characterIds); setSummaryOpen(false) }} />}
@@ -1957,6 +1975,7 @@ function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, 
   return (
     <div className={`story-scene ${className}`}>
       <div
+        data-onboarding-target="portrait"
         className="portrait-zone"
         onTouchStart={(event) => {
           lastTouchYRef.current = event.touches[0]?.clientY ?? 0
@@ -1986,7 +2005,7 @@ function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, 
         <StagePortraits actors={actors} activeCharacterId={activeCharacterId} mode={mode} onViewStatus={onViewStatus} changedStatusCharacterIds={changedStatusCharacterIds} />
         {viewedStatusCharacterId && <CharacterStatusOverlay character={actors.find((actor) => actor.character.id === viewedStatusCharacterId)?.character} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled} statusRulesEnabled={statusRulesEnabled} onClose={() => onViewStatus(null)} />}
       </div>
-      <div className="content-zone" ref={contentRef}>{children}</div>
+      <div className="content-zone" data-onboarding-target="content" ref={contentRef}>{children}</div>
     </div>
   )
 }

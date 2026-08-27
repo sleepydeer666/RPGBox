@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArrowDown, ArrowUp, BookCopy, BookOpen, Check, Download, FileUp, Info, Pencil, Plus, Settings, Trash2, X } from 'lucide-react'
+import { ArchiveRestore, ArrowDown, ArrowUp, BookCopy, BookOpen, Check, Compass, Download, FileUp, Info, Pencil, Plus, Settings, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import packageJson from '../../package.json'
 import type { BundledRpgPreset } from '../lib/bundledRpg'
@@ -25,6 +25,7 @@ export interface GameDrawerProps {
   bundledRpgImportKeys: string[]
   onImportBundledRpg: (key: string, onPortraitProgress?: (completed: number, total: number) => void) => Promise<void>
   onOpenSettings: () => void
+  onStartOnboarding: () => void
 }
 
 export default function GameDrawer(props: GameDrawerProps) {
@@ -195,6 +196,7 @@ export default function GameDrawer(props: GameDrawerProps) {
         <div className="drawer-footer-actions">
           <button onClick={props.onOpenSettings}><Settings size={19} /><span>全局设置</span></button>
           <button onClick={openPresetDialog}><ArchiveRestore size={19} /><span>导入预设</span></button>
+          <button onClick={props.onStartOnboarding} disabled={!props.games.length} title={props.games.length ? '打开新手导航' : '请先创建或导入 RPG'}><Compass size={19} /><span>新手导航</span></button>
           <button onClick={() => setAboutOpen(true)}><Info size={19} /><span>关于</span></button>
         </div>
       </aside>
