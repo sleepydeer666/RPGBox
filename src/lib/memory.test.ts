@@ -54,8 +54,8 @@ describe('chapter memory model', () => {
 
   it('clamps the configurable recent chapter count', () => {
     expect(clampRecentChapterLimit(undefined)).toBe(5)
-    expect(clampRecentChapterLimit(0)).toBe(1)
-    expect(clampRecentChapterLimit(50)).toBe(20)
+    expect(clampRecentChapterLimit(0)).toBe(3)
+    expect(clampRecentChapterLimit(50)).toBe(10)
   })
 
   it('moves only the oldest chapters beyond the configured limit', () => {

@@ -15,7 +15,7 @@ export const OPENING_MESSAGE = `[状态] 地点：旧城区旅店；时间：深
 export function createDefaultAiSettings(provider?: ProviderProfile): GameAiSettings {
   return {
     providerId: provider?.id ?? 'default-provider',
-    model: provider?.model ?? 'gpt-4o-mini',
+    model: provider?.model ?? '',
     useCompatiblePromptFormat: true,
     temperature: provider?.temperature ?? 0.5,
     topP: provider?.topP ?? 1,

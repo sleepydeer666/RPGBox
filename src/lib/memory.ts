@@ -23,7 +23,7 @@ export function normalizeMemoryState(memory: Partial<MemoryState> | undefined): 
 
 export function clampRecentChapterLimit(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_RECENT_CHAPTER_LIMIT
-  return Math.min(20, Math.max(1, Math.round(value as number)))
+  return Math.min(10, Math.max(3, Math.round(value as number)))
 }
 
 export function recentChapterMemories(memory: MemoryState): ChapterMemory[] {

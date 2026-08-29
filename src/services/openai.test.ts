@@ -57,8 +57,6 @@ describe('streamCompletion', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       temperature: 1,
       top_p: 1,
-      presence_penalty: 0,
-      frequency_penalty: 0,
       max_tokens: 100,
       stream: true,
       stream_options: { include_usage: true },

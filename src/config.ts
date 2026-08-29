@@ -9,10 +9,10 @@ export const DEFAULT_SYSTEM_PROMPT = DEFAULT_STORY_STYLE_PROMPT
 export const DEFAULT_PROVIDER: ProviderProfile = {
   id: 'default-provider',
   name: '默认 API',
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: '',
   apiKey: '',
-  model: 'gpt-4o-mini',
-  models: ['gpt-4o-mini'],
+  model: '',
+  models: [],
   temperature: 0.5,
   topP: 1,
   presencePenalty: 0,

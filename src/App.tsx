@@ -173,7 +173,6 @@ function App() {
   const inputVisible = !busy && segmentsComplete && (!choicesAvailable || choicesVisible)
   const responseCompletion = useMemo(() => inspectLatestResponseCompletion(activeGame), [activeGame])
   const protocolAnomaly = useMemo(() => Boolean(activeGame.aiSettings.warnOnProtocolAnomaly)
-    && !activeGame.aiSettings.treatMalformedLinesAsNarration
     && !busy
     && Boolean(latestAssistant?.rawContent)
     && hasProtocolAnomaly(
@@ -1675,7 +1674,7 @@ function App() {
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
-      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} initialContentMode={latestInitialContentMode} narrativeModes={activeGame.narrativeModes} onClose={() => setDebugOpen(false)} />}
+      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} initialContentMode={latestInitialContentMode} narrativeModes={activeGame.narrativeModes} treatMalformedLinesAsNarration={activeGame.aiSettings.treatMalformedLinesAsNarration} onClose={() => setDebugOpen(false)} />}
       {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponseFormat()} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} actionsDisabled={busy || !activeProvider} onSummarize={summarizeMemoryNow} onSummarizeExperiences={summarizeCharacterExperiencesNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
@@ -2133,7 +2132,7 @@ function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: Re
 
 type DebugTab = 'input' | 'output' | 'memory' | 'experience'
 
-function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, characters, contentMode, initialContentMode, narrativeModes, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; characters: CharacterProfile[]; contentMode?: PortraitGroup; initialContentMode?: PortraitGroup; narrativeModes?: GameSession['narrativeModes']; onClose: () => void }) {
+function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, characters, contentMode, initialContentMode, narrativeModes, treatMalformedLinesAsNarration, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; characters: CharacterProfile[]; contentMode?: PortraitGroup; initialContentMode?: PortraitGroup; narrativeModes?: GameSession['narrativeModes']; treatMalformedLinesAsNarration?: boolean; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<DebugTab>('input')
   const promptGroups = groupDebugPromptSegments(requestSegments)
   const experienceEntries = memorySummaryEntries.filter((entry) => entry.label.startsWith('角色经历整理：'))
@@ -2144,7 +2143,7 @@ function RawResponseDialog({ requestSegments, content, repairContent, memorySumm
   const memoryResponse = memoryEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
   const experienceRequest = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.request}`).join('\n\n')
   const experienceResponse = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
-  const anomalyIndexes = protocolAnomalyLineIndexes(content, { characters, contentMode, initialContentMode, narrativeModes })
+  const anomalyIndexes = protocolAnomalyLineIndexes(content, { characters, contentMode, initialContentMode, narrativeModes, treatMalformedLinesAsNarration })
   const anomalyRanges = protocolAnomalyExpressionRanges(content, { characters, contentMode, initialContentMode, narrativeModes })
   const shownInputTokens = activeTab === 'memory' ? memoryInputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.inputTokens === undefined ? total : (total ?? 0) + entry.inputTokens, undefined) : inputTokens
   const shownOutputTokens = activeTab === 'memory' ? memoryOutputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.outputTokens === undefined ? total : (total ?? 0) + entry.outputTokens, undefined) : outputTokens

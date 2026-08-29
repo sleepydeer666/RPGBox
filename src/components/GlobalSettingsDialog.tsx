@@ -139,11 +139,12 @@ export default function GlobalSettingsDialog(props: Props) {
             <div className="form-section">
               <div className="form-section-head"><h3>API 配置</h3><button className="danger-icon" onClick={removeProvider} disabled={draftProviders.length === 1} title="删除当前配置"><Trash2 size={17} /></button></div>
               <label>配置名称<input value={active.name} onChange={(event) => updateActive({ name: event.target.value })} /></label>
-              <label>Base URL<input value={active.baseUrl} onChange={(event) => updateActive({ baseUrl: event.target.value })} autoCapitalize="none" /></label>
+              <label>Base URL<input value={active.baseUrl} onChange={(event) => updateActive({ baseUrl: event.target.value })} autoCapitalize="none" placeholder="请输入大语言模型API的URL地址" /></label>
               <label>API Key<input type="password" value={active.apiKey} onChange={(event) => updateActive({ apiKey: event.target.value })} autoCapitalize="none" /></label>
             </div>
             <div className="form-section model-section">
               <div className="form-section-head"><div><h3>模型</h3><span className="section-meta">已添加 {activeModels.length} 个</span></div><button className="secondary-button" onClick={() => void loadRemoteModels()} disabled={modelLoading || !active.baseUrl.trim()}><RefreshCw className={modelLoading ? 'spin' : ''} size={15} />从接口获取</button></div>
+              {!active.model.trim() && <p className="model-required-warning">尚未指定默认模型</p>}
               {activeModels.length > 0 ? <div className="added-model-list">{activeModels.map((model) => <div className={`added-model-row ${model === active.model ? 'active' : ''}`} key={model}><button className="model-select-button" onClick={() => updateActive({ model })}><span className="model-radio">{model === active.model && <Check size={13} />}</span><span>{model}</span></button><button className="model-remove-button" onClick={() => removeModel(model)} title={`删除 ${model}`}><X size={15} /></button></div>)}</div> : <p className="empty-models">尚未添加模型</p>}
               <div className="manual-model-row"><input value={manualModel} onChange={(event) => setManualModel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addModels([manualModel]); setManualModel('') } }} placeholder="手动输入模型 ID" autoCapitalize="none" /><button className="icon-button" onClick={() => { addModels([manualModel]); setManualModel('') }} disabled={!manualModel.trim()} title="添加模型"><Plus size={17} /></button></div>
               {modelError && <div className="inline-error">{modelError}</div>}

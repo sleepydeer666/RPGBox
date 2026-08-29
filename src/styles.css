@@ -2851,6 +2851,13 @@ textarea:focus-visible {
   opacity: 0.45;
 }
 
+.memory-limit-description {
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
 .narrative-mode-heading {
   display: flex;
   align-items: flex-start;
@@ -3907,6 +3914,12 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.model-required-warning {
+  margin: 0 0 8px;
+  color: #e06a6a;
+  font-size: 12px;
+}
+
 .inline-error {
   margin-top: 10px;
   padding: 9px 10px;
@@ -4274,6 +4287,18 @@ textarea:focus-visible {
 .memory-rule-section textarea {
   min-height: 120px;
   resize: vertical;
+}
+
+.memory-limit-setting {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.memory-limit-setting input {
+  width: 100%;
 }
 
 .memory-default-rule {

@@ -398,15 +398,12 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.useCompatiblePromptFormat ?? true} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, useCompatiblePromptFormat: event.target.checked } })} /><span><strong>使用兼容格式</strong><small>关闭兼容模式理论上能够提升稳定性，但部分API不支持。如果LLM返回的格式、内容不符合要求，请保持此选项开启。</small></span></label>
               <ParameterSlider label="温度" min={0} max={2} step={0.05} value={game.aiSettings.temperature} onChange={(temperature) => patchGame({ aiSettings: { ...game.aiSettings, temperature } })} />
               <ParameterSlider label="Top P" min={0} max={1} step={0.05} value={game.aiSettings.topP} onChange={(topP) => patchGame({ aiSettings: { ...game.aiSettings, topP } })} />
-              <ParameterSlider label="存在惩罚" min={-2} max={2} step={0.05} value={game.aiSettings.presencePenalty} onChange={(presencePenalty) => patchGame({ aiSettings: { ...game.aiSettings, presencePenalty } })} />
-              <ParameterSlider label="频率惩罚" min={-2} max={2} step={0.05} value={game.aiSettings.frequencyPenalty} onChange={(frequencyPenalty) => patchGame({ aiSettings: { ...game.aiSettings, frequencyPenalty } })} />
               <label>最大输出 Token<input type="number" min="128" max="131072" step="128" value={maxTokensDraft} onChange={(event) => setMaxTokensDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
               <label>对话轮数<input type="number" min="1" max="100" step="1" value={contextTurnsDraft} onChange={(event) => setContextTurnsDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
-              <label>主记忆章节数<input type="number" min="1" max="20" step="1" value={memoryLimitDraft} onChange={(event) => setMemoryLimitDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
             </div>
             <div className="form-section"><h3>输出检查</h3>
-              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.treatMalformedLinesAsNarration ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, treatMalformedLinesAsNarration: event.target.checked, ...(event.target.checked ? { warnOnProtocolAnomaly: false } : {}) } })} /><span><strong>错误格式以旁白处理</strong><small>针对如deepseek flash等格式遵守能力较弱的模型，激活此功能将把所有错误格式文本作为旁白显示。</small></span></label>
-              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} disabled={game.aiSettings.treatMalformedLinesAsNarration ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label>
+              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.treatMalformedLinesAsNarration ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, treatMalformedLinesAsNarration: event.target.checked } })} /><span><strong>错误格式以旁白处理</strong><small>针对如deepseek flash等格式遵守能力较弱的模型，激活此功能将把所有错误格式文本作为旁白显示。</small></span></label>
+              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label>
             </div>
           </section>}
 
@@ -415,7 +412,23 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
             <div className="form-section"><h3>叙事模式切换规则</h3><p className="form-section-description">描述不同叙事模式之间的切换条件，以及不同章节或剧情内容应采用的叙事模式。此规则会始终注入提示词。</p><DeferredTextarea className="game-prompt-textarea" value={game.narrativeModeRulesPrompt ?? ''} onCommit={(narrativeModeRulesPrompt) => patchGame({ narrativeModeRulesPrompt })} placeholder="例如：日常章节使用正常模式；进入亲密情节前通过选项切换至 NSFW 模式……" /></div>
             <div className="form-section"><h3>状态栏规则</h3><p className="form-section-description">定义角色状态栏需要保存的字段、书写格式和更新条件。留空时不会要求AI输出角色状态，也不会自动更新角色状态栏。</p><DeferredTextarea className="game-prompt-textarea" value={game.statusRulesPrompt ?? ''} onCommit={(statusRulesPrompt) => patchGame({ statusRulesPrompt })} placeholder="例如：记录服装、身体状态、情绪和临时效果；只保留当前仍然有效的信息……" /><label className="setting-toggle"><input type="checkbox" checked={game.clearStatusBarAfterChapter ?? true} onChange={(event) => patchGame({ clearStatusBarAfterChapter: event.target.checked })} /><span><strong>章节结束后自动清空状态栏</strong><small>取消勾选，章节结束后保留状态栏</small></span></label></div>
             <div className="form-section"><h3>记忆规则</h3><p className="form-section-description">记忆和角色经历的内容、生成规则可在 RPG 主界面的“记忆”标签下查看。关闭功能不会删除已有内容。</p>
-              {([['chapterMemoryEnabled', '启用章节记忆', '每章结束后整理本章剧情，保留最近章节的摘要。'], ['distantMemoryEnabled', '启用远期记忆', '章节摘要超出保留上限时，将较早章节压缩为长期事实。'], ['characterExperienceEnabled', '启用角色经历', '章节结束后，基于该章章节记忆按出场比例整理角色的重要事件与关系变化。']] as const).map(([key, label, description]) => <label className="setting-toggle" key={key}><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory)[key])} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), [key]: event.target.checked } })} /><span><strong>{label}</strong><small>{description}</small></span></label>)}
+              <label className="setting-toggle"><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory).chapterMemoryEnabled)} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), chapterMemoryEnabled: event.target.checked } })} /><span><strong>启用章节记忆</strong><small>每章结束后整理本章剧情，保留最近章节的摘要。</small></span></label>
+              <ParameterSlider
+                label="主记忆章节数"
+                min={3}
+                max={10}
+                step={1}
+                precision={0}
+                value={clampRecentChapterLimit(Number(memoryLimitDraft))}
+                disabled={!normalizeMemoryState(game.memory).chapterMemoryEnabled}
+                onChange={(value) => {
+                  const recentChapterLimit = clampRecentChapterLimit(value)
+                  setMemoryLimitDraft(String(recentChapterLimit))
+                  patchGame({ memory: { ...normalizeMemoryState(game.memory), recentChapterLimit } })
+                }}
+              />
+              <p className="form-section-description memory-limit-description">主记忆章节会加入上下文提示词，更早的记忆会自动整理成远期记忆（如启用）。</p>
+              {([['distantMemoryEnabled', '启用远期记忆', '章节摘要超出保留上限时，将较早章节压缩为长期事实。'], ['characterExperienceEnabled', '启用角色经历', '章节结束后，基于该章章节记忆按出场比例整理角色的重要事件与关系变化。']] as const).map(([key, label, description]) => <label className="setting-toggle" key={key}><input type="checkbox" checked={Boolean(normalizeMemoryState(game.memory)[key])} onChange={(event) => patchGame({ memory: { ...normalizeMemoryState(game.memory), [key]: event.target.checked } })} /><span><strong>{label}</strong><small>{description}</small></span></label>)}
             </div>
             <div className="form-section narrative-mode-section"><div className="narrative-mode-heading"><div><h3>叙事模式</h3><p className="form-section-description">叙事模式用于区分当前的故事状态，可针对不同状态设计不同的故事生成规则，人物立绘等</p></div><button type="button" className="secondary-button" onClick={addNarrativeMode}><Plus size={15} />新增模式</button></div><div className="narrative-mode-list">{narrativeModes.map((mode, index) => <div className="narrative-mode-row" key={mode.id}><span className="narrative-mode-order">{index + 1}</span><input className="narrative-mode-name-input" aria-label={`叙事模式 ${index + 1} 名称`} value={narrativeModeNameDrafts[mode.id] ?? mode.name} onChange={(event) => setNarrativeModeNameDrafts((current) => ({ ...current, [mode.id]: event.target.value }))} onBlur={(event) => finishNarrativeModeName(mode, event.target.value)} /><CharacterColorControl compact value={mode.color} onChange={(color) => patchNarrativeMode(mode.id, { color })} /><button type="button" className="danger-icon" disabled={narrativeModes.length <= 1} onClick={() => deleteNarrativeMode(mode.id)} title={narrativeModes.length <= 1 ? '至少保留一个叙事模式' : `删除${mode.name}`}><Trash2 size={16} /></button></div>)}</div></div>
           </section>}

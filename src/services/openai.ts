@@ -135,8 +135,6 @@ export async function streamCompletion({
       messages,
       temperature: provider.temperature,
       top_p: provider.topP,
-      presence_penalty: provider.presencePenalty,
-      frequency_penalty: provider.frequencyPenalty,
       max_tokens: provider.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
