@@ -99,6 +99,7 @@ function App() {
   const [continuingResponse, setContinuingResponse] = useState(false)
   const [summarizingMemory, setSummarizingMemory] = useState<string | null>(null)
   const [autoMemoryFeedback, setAutoMemoryFeedback] = useState<{ key: number; status: 'success' | 'error' } | null>(null)
+  const [interactionNotice, setInteractionNotice] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [protocolAlertKey, setProtocolAlertKey] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
@@ -630,6 +631,11 @@ function App() {
       options.onDebug?.(formatMemorySummaryDebug(`章节记忆总结：${chapterTitle}`, debugRequest, responses, usage, message))
       throw error
     }
+  }
+
+  function notifyInteraction(message: string) {
+    setInteractionNotice(message)
+    window.setTimeout(() => setInteractionNotice((current) => current === message ? null : current), 2600)
   }
 
   async function summarizeDistantMemory(existing: string, chapters: ChapterMemory[], signal: AbortSignal, additionalInstructions = '', onDebug?: (entry: MemorySummaryDebugEntry) => void) {
@@ -1169,6 +1175,10 @@ function App() {
   }
 
   async function sendTurn(forcedInput?: string) {
+    if (summarizingMemory) {
+      notifyInteraction('正在总结上一章的记忆，请稍候')
+      return
+    }
     const choiceText = selectedChoices.join('')
     const supplement = customInput.trim()
     const input = forcedInput?.trim() || [choiceText, supplement].filter(Boolean).join('，但是')
@@ -1649,7 +1659,7 @@ function App() {
                 </div>
               </div>
             ) : inputVisible && !showProgressContinuation ? (
-              <div className="composer"><textarea value={customInput} onChange={(event) => setCustomInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendTurn() } }} placeholder={selectedChoices.length ? '补充行动（可选）' : '输入自定义行动'} rows={1} /><button className="send-button" onClick={() => void sendTurn()} disabled={!customInput.trim() && !selectedChoices.length} title="发送行动"><Send size={19} /></button></div>
+              <div className="composer"><textarea value={customInput} onChange={(event) => setCustomInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendTurn() } }} placeholder={selectedChoices.length ? '补充行动（可选）' : '输入自定义行动'} rows={1} /><button className={`send-button ${summarizingMemory ? 'memory-blocked' : ''}`} onClick={() => void sendTurn()} disabled={!summarizingMemory && !customInput.trim() && !selectedChoices.length} aria-disabled={summarizingMemory ? 'true' : undefined} title={summarizingMemory ? '正在总结上一章的记忆，请稍候' : '发送行动'}><Send size={19} /></button></div>
             ) : (
               <div className="playback-info">
                 <div className="narrative-position">{displayChapterTitle || '章节间过渡'}-{displayChapterTurnCount}</div>
@@ -1658,13 +1668,14 @@ function App() {
             )}
           </div>}
         </footer>
+        {interactionNotice && <div className="interaction-notice" role="status" aria-live="polite">{interactionNotice}</div>}
       </main>
 
       <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} onStartOnboarding={() => { setGameDrawerOpen(false); setOnboardingOpen(true) }} />
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
-      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} onClose={() => setDebugOpen(false)} />}
+      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} initialContentMode={latestInitialContentMode} narrativeModes={activeGame.narrativeModes} onClose={() => setDebugOpen(false)} />}
       {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponseFormat()} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} actionsDisabled={busy || !activeProvider} onSummarize={summarizeMemoryNow} onSummarizeExperiences={summarizeCharacterExperiencesNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
@@ -2122,7 +2133,7 @@ function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: Re
 
 type DebugTab = 'input' | 'output' | 'memory' | 'experience'
 
-function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, characters, contentMode, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; characters: CharacterProfile[]; contentMode?: PortraitGroup; onClose: () => void }) {
+function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, characters, contentMode, initialContentMode, narrativeModes, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; characters: CharacterProfile[]; contentMode?: PortraitGroup; initialContentMode?: PortraitGroup; narrativeModes?: GameSession['narrativeModes']; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<DebugTab>('input')
   const promptGroups = groupDebugPromptSegments(requestSegments)
   const experienceEntries = memorySummaryEntries.filter((entry) => entry.label.startsWith('角色经历整理：'))
@@ -2133,8 +2144,8 @@ function RawResponseDialog({ requestSegments, content, repairContent, memorySumm
   const memoryResponse = memoryEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
   const experienceRequest = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.request}`).join('\n\n')
   const experienceResponse = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
-  const anomalyIndexes = protocolAnomalyLineIndexes(content, { characters, contentMode })
-  const anomalyRanges = protocolAnomalyExpressionRanges(content, { characters, contentMode })
+  const anomalyIndexes = protocolAnomalyLineIndexes(content, { characters, contentMode, initialContentMode, narrativeModes })
+  const anomalyRanges = protocolAnomalyExpressionRanges(content, { characters, contentMode, initialContentMode, narrativeModes })
   const shownInputTokens = activeTab === 'memory' ? memoryInputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.inputTokens === undefined ? total : (total ?? 0) + entry.inputTokens, undefined) : inputTokens
   const shownOutputTokens = activeTab === 'memory' ? memoryOutputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.outputTokens === undefined ? total : (total ?? 0) + entry.outputTokens, undefined) : outputTokens
   return (

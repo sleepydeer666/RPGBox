@@ -2608,6 +2608,28 @@ textarea:focus-visible {
   cursor: default;
 }
 
+.send-button.memory-blocked {
+  opacity: 0.35;
+  cursor: pointer;
+}
+
+.interaction-notice {
+  position: absolute;
+  z-index: 30;
+  right: 50%;
+  bottom: 86px;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 11px 18px;
+  transform: translateX(50%);
+  border: 1px solid var(--gold-dark);
+  border-radius: 5px;
+  background: rgba(18, 19, 17, 0.96);
+  color: var(--gold);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  text-align: center;
+  pointer-events: none;
+}
+
 .send-button.stop {
   background: var(--danger);
 }

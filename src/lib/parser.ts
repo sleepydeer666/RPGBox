@@ -156,13 +156,13 @@ function parseDialogueLine(line: string, context: ResponseParseContext): StorySe
   }
 }
 
-function invalidExpressionRange(line: string, context: ResponseParseContext): { start: number; end: number } | undefined {
+function invalidExpressionRange(line: string, context: ResponseParseContext, mode = context.contentMode): { start: number; end: number } | undefined {
   const match = line.match(DIALOGUE_LINE_PATTERN)
   if (!match) return undefined
   const character = findCharacter(context, match[1].trim())
   if (!character?.portraits?.length) return undefined
-  if (!context.contentMode) return undefined
-  const allowed = new Set(character.portraits.filter((portrait) => (portrait.groups ?? ['normal']).includes(context.contentMode!)).flatMap((portrait) => portrait.tags?.length ? portrait.tags : [portrait.expression]).filter(Boolean).map((tag) => tag.trim().toLocaleLowerCase()))
+  if (!mode) return undefined
+  const allowed = new Set(character.portraits.filter((portrait) => (portrait.groups ?? ['normal']).includes(mode)).flatMap((portrait) => portrait.tags?.length ? portrait.tags : [portrait.expression]).filter(Boolean).map((tag) => tag.trim().toLocaleLowerCase()))
   const requested = match[2].trim().split(/[、,，/\s]+/u).filter(Boolean)
   if (!requested.length || requested.every((tag) => allowed.has(tag.toLocaleLowerCase()))) return undefined
   const contentStart = match.index! + match[0].indexOf(match[2])
@@ -171,8 +171,11 @@ function invalidExpressionRange(line: string, context: ResponseParseContext): { 
 
 export function protocolAnomalyExpressionRanges(raw: string, context: ResponseParseContext = {}): Array<{ line: number; start: number; end: number }> {
   const story = visibleStory(raw)
+  let mode = context.initialContentMode ?? context.contentMode
   return story.split(/\n/).flatMap((line, lineIndex) => {
-    const range = invalidExpressionRange(line, context)
+    const switched = context.contentMode ? parseNarrativeModeSwitchLine(line.trim(), context.contentMode, context.narrativeModes) : undefined
+    if (switched && context.contentMode) { mode = context.contentMode; return [] }
+    const range = invalidExpressionRange(line, { ...context, contentMode: mode })
     return range ? [{ line: lineIndex, ...range }] : []
   })
 }
@@ -222,15 +225,34 @@ function isProtocolLine(line: string, context: ResponseParseContext): boolean {
 }
 
 export function protocolAnomalyLineIndexes(raw: string, context: ResponseParseContext = {}): number[] {
+  if (VISUAL_BLANK_LINE_PATTERN.test(raw)) return []
+  if (GAME_DATA_PATTERN.test(raw)) return [0]
   const story = visibleStory(normalizeProtocolResponse(raw, { ...context, treatMalformedLinesAsNarration: false }))
   let choicesStarted = false
-  return story.split(/\n/).map((line, index) => {
+  let narrativeModeSwitched = false
+  return story.split(/\n/).map((line, index, lines) => {
     const trimmed = line.trim()
+    if (VISUAL_BLANK_LINE_PATTERN.test(trimmed)) return -1
     if (CHOICE_LINE_SINGLE_PATTERN.test(trimmed)) { choicesStarted = true; return -1 }
-    const invalid = choicesStarted
-      ? !isLooseStatusLine(trimmed, context) && !isStateLine(trimmed) && !isProgressLine(trimmed)
-      : !isProtocolLine(trimmed, context)
-    return trimmed && invalid ? index : -1
+    if (choicesStarted) return !isLooseStatusLine(trimmed, context) && !isStateLine(trimmed) && !isProgressLine(trimmed) ? index : -1
+    if (parseStatusLine(trimmed) || isProgressLine(trimmed) || NARRATION_LINE_PATTERN.test(trimmed)) return -1
+    if (NARRATIVE_MODE_SWITCH_PATTERN.test(trimmed)) {
+      const expected = context.narrativeModes?.length
+        ? context.narrativeModes.some((mode) => parseNarrativeModeSwitchLine(trimmed, mode.id, context.narrativeModes))
+        : Boolean(context.contentMode && context.initialContentMode !== context.contentMode && parseNarrativeModeSwitchLine(trimmed, context.contentMode, context.narrativeModes))
+      if (!expected || narrativeModeSwitched) return index
+      narrativeModeSwitched = true
+      return -1
+    }
+    const characterStatus = trimmed.match(CHARACTER_STATUS_LINE_PATTERN)
+    if (characterStatus) return context.characters?.length && !findCharacter(context, characterStatus[1].trim()) ? index : -1
+    if (!trimmed) return -1
+    if (PLAYER_DIALOGUE_LINE_PATTERN.test(trimmed)) return index
+    const bareDialogue = trimmed.match(BARE_CHARACTER_DIALOGUE_LINE_PATTERN)
+    if (bareDialogue && findCharacter(context, bareDialogue[1].trim())) return -1
+    const dialogue = trimmed.match(DIALOGUE_LINE_PATTERN)
+    if (!dialogue) return index !== lines.length - 1 || !isPlausiblyTruncatedProtocolLine(trimmed, context) ? index : -1
+    return !context.characters?.length || !context.characters.some((item) => item.name === dialogue[1].trim()) ? index : -1
   }).filter((index) => index >= 0)
 }
 
@@ -427,6 +449,8 @@ export function visibleStory(raw: string): string {
 }
 
 export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = {}): boolean {
+  return protocolAnomalyLineIndexes(raw, context).length > 0
+  /*
   if (VISUAL_BLANK_LINE_PATTERN.test(raw)) return false
   if (GAME_DATA_PATTERN.test(raw)) return true
   const normalized = normalizeProtocolResponse(raw, context)
@@ -448,6 +472,7 @@ export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = 
     }
     if (CHAPTER_END_PATTERN.test(line) || NARRATION_LINE_PATTERN.test(line) || CHOICE_LINE_SINGLE_PATTERN.test(line)) return false
     const characterStatus = line.match(CHARACTER_STATUS_LINE_PATTERN)
+    if (isProgressLine(line)) return false
     if (characterStatus) return Boolean(context.characters?.length) && !findCharacter(context, characterStatus[1].trim())
     if (PLAYER_DIALOGUE_LINE_PATTERN.test(line)) return true
     const bareDialogue = line.match(BARE_CHARACTER_DIALOGUE_LINE_PATTERN)
@@ -458,6 +483,7 @@ export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = 
     if (!context.characters.some((item) => item.name === dialogue[1].trim())) return true
     return false
   })
+  */
 }
 
 function isPlausiblyTruncatedProtocolLine(line: string, context: ResponseParseContext): boolean {
