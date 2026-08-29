@@ -67,6 +67,7 @@ export interface GameAiSettings {
   maxTokens: number
   contextTurns: number
   warnOnProtocolAnomaly: boolean
+  treatMalformedLinesAsNarration?: boolean
 }
 
 export interface CharacterPortrait {

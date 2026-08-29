@@ -370,7 +370,7 @@ export function normalizeAssistantMessageForContext(
     if (!character) return [line]
     const { options, defaultTag } = portraitStateOptions(character, currentMode)
     const suppliedState = match[3].trim()
-    if (options.includes(suppliedState) || (!options.length && suppliedState === '无')) return [line]
+    if (options.some((option) => option.trim().toLocaleLowerCase() === suppliedState.toLocaleLowerCase()) || (!options.length && suppliedState === '无')) return [line]
     return [`${match[1]}${match[2]}（${defaultTag ?? '无'}）${match[4]}`]
   }).join('\n')
 }

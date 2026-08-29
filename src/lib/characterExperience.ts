@@ -27,12 +27,13 @@ export function chapterExperienceTargets(
   messages: ChatMessage[],
   characters: CharacterProfile[],
   existingExperiences: Record<string, string> = {},
+  treatMalformedLinesAsNarration = false,
 ): CharacterExperienceTarget[] {
   const counts = new Map<string, number>()
   let rounds = 0
   for (const message of messages) {
     if (message.role !== 'assistant') continue
-    const parsed = parseAssistantResponse(message.rawContent ?? message.content, { characters })
+    const parsed = parseAssistantResponse(message.rawContent ?? message.content, { characters, treatMalformedLinesAsNarration })
     if (!parsed.segments.length) continue
     rounds += 1
     const present = new Set<string>()

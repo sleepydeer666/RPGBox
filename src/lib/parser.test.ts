@@ -372,7 +372,7 @@ describe('hasProtocolAnomaly', () => {
     expect(hasProtocolAnomaly('[状态] 地点：书房；时间：夜晚\n维纳斯（平', context)).toBe(false)
   })
 
-  it('accepts dialogue states outside the configured portrait tags', () => {
+  it('detects dialogue states outside the configured portrait tags', () => {
     expect(hasProtocolAnomaly('[状态] 模式：NSFW；地点：书房；时间：夜晚\n维纳斯（激动）：继续吧。', context)).toBe(false)
   })
 

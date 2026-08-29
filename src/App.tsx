@@ -16,7 +16,7 @@ import { buildHistoryLines } from './lib/history'
 import { importBundledRpg, listBundledRpgPresets, type BundledRpgPreset } from './lib/bundledRpg'
 import { archivedChapterMemories, characterExperience, currentChapterSummary, mergeChapterMemories, normalizeMemoryState, partitionRecentChapterMemories, pendingDistantChapterMemories, recentChapterMemories } from './lib/memory'
 import { buildChapterSummaryDebugRequest, buildDistantSummaryDebugRequest, CHAPTER_SUMMARY_SYSTEM_PROMPT, DISTANT_SUMMARY_SYSTEM_PROMPT, formatAdditionalMemorySummaryInstructions, formatCharacterExperienceSummaryTargets, isValidChapterSummary, isValidDistantSummary, normalizeMemorySummaryOutput } from './lib/memorySummary'
-import { hasProtocolAnomaly, normalizeProtocolResponse, parseAssistantResponse, standardResponse } from './lib/parser'
+import { hasProtocolAnomaly, normalizeProtocolResponse, parseAssistantResponse, protocolAnomalyExpressionRanges, protocolAnomalyLineIndexes, standardResponse } from './lib/parser'
 import { completedTurnPlaybackIndex, hasCompleteVisibleContent, isChoicePageVisible, parsePlaybackResponse, reconcilePlaybackIndex, resolvePlayback, resolvePlaybackContentMode, scenePresentationChanged } from './lib/playback'
 import { portraitSource } from './lib/portraits'
 import { deletePortraitFile } from './lib/portraits'
@@ -148,6 +148,7 @@ function App() {
     contentMode: latestFinalContentMode,
     initialContentMode: latestInitialContentMode,
     narrativeModes: activeGame.narrativeModes,
+    treatMalformedLinesAsNarration: activeGame.aiSettings.treatMalformedLinesAsNarration,
   }, true), [activeGame.characters, activeGame.narrativeModes, latestAssistant?.content, latestAssistant?.rawContent, latestFinalContentMode, latestInitialContentMode])
   const streamingParsed = useMemo(
     () => parsePlaybackResponse(latestAssistant?.rawContent ?? latestAssistant?.content ?? '', {
@@ -155,6 +156,7 @@ function App() {
       contentMode: latestFinalContentMode,
       initialContentMode: latestInitialContentMode,
       narrativeModes: activeGame.narrativeModes,
+      treatMalformedLinesAsNarration: activeGame.aiSettings.treatMalformedLinesAsNarration,
     }),
     [activeGame.characters, activeGame.narrativeModes, latestAssistant?.content, latestAssistant?.rawContent, latestFinalContentMode, latestInitialContentMode],
   )
@@ -170,6 +172,7 @@ function App() {
   const inputVisible = !busy && segmentsComplete && (!choicesAvailable || choicesVisible)
   const responseCompletion = useMemo(() => inspectLatestResponseCompletion(activeGame), [activeGame])
   const protocolAnomaly = useMemo(() => Boolean(activeGame.aiSettings.warnOnProtocolAnomaly)
+    && !activeGame.aiSettings.treatMalformedLinesAsNarration
     && !busy
     && Boolean(latestAssistant?.rawContent)
     && hasProtocolAnomaly(
@@ -364,10 +367,6 @@ function App() {
     }
     const alertKey = `${activeGame.id}:${latestAssistant.id}`
     setProtocolAlertKey(alertKey)
-    const timer = window.setTimeout(() => {
-      setProtocolAlertKey((current) => current === alertKey ? null : current)
-    }, 5000)
-    return () => window.clearTimeout(timer)
   }, [activeGame.id, latestAssistant?.id, protocolAnomaly])
 
   useEffect(() => {
@@ -839,6 +838,7 @@ function App() {
       contentMode: continuationContentMode,
       initialContentMode: continuationInitialContentMode,
       narrativeModes: gameSnapshot.narrativeModes,
+      treatMalformedLinesAsNarration: gameSnapshot.aiSettings.treatMalformedLinesAsNarration,
     }
     const originalRaw = normalizeProtocolResponse(assistantMessage.rawContent ?? assistantMessage.content, parseContext)
     const continuationPromptInitialMode = parseAssistantResponse(originalRaw, parseContext).narrativeModeSwitchIndexes.length
@@ -1096,6 +1096,7 @@ function App() {
       contentMode: resolvedContentMode,
       initialContentMode,
       narrativeModes: restoredGame.narrativeModes,
+      treatMalformedLinesAsNarration: restoredGame.aiSettings.treatMalformedLinesAsNarration,
     }
     try {
       let completionUsage: CompletionUsage | undefined
@@ -1277,7 +1278,7 @@ function App() {
     setLlmSpecialInstructions(EMPTY_LLM_SPECIAL_INSTRUCTIONS)
     setLlmSpecialInstructionsOpen(false)
     setRpgStateLocked(false)
-    const parseContext = { characters: gameSnapshot.characters, narrativeModes: gameSnapshot.narrativeModes }
+    const parseContext = { characters: gameSnapshot.characters, narrativeModes: gameSnapshot.narrativeModes, treatMalformedLinesAsNarration: gameSnapshot.aiSettings.treatMalformedLinesAsNarration }
     const normalizedHistory = gameSnapshot.messages.map((message) => message.role === 'assistant'
       ? {
           ...message,
@@ -1321,6 +1322,7 @@ function App() {
         contentMode: resolvedContentMode,
         initialContentMode,
         narrativeModes: gameSnapshot.narrativeModes,
+        treatMalformedLinesAsNarration: gameSnapshot.aiSettings.treatMalformedLinesAsNarration,
       }
       const fullText = await streamCompletion({
         provider: activeProvider,
@@ -1423,7 +1425,7 @@ function App() {
           try {
             const sourceMessages = chapterMessages(gameSnapshot, gameSnapshot.messages, previousChapter, pendingChapterMemory?.sourceMessageIds)
             const experienceTargets = normalizedMemory.characterExperienceEnabled
-              ? chapterExperienceTargets(sourceMessages, gameSnapshot.characters, normalizedMemory.characterExperiences)
+              ? chapterExperienceTargets(sourceMessages, gameSnapshot.characters, normalizedMemory.characterExperiences, gameSnapshot.aiSettings.treatMalformedLinesAsNarration)
               : []
             let summary: string | undefined
             if (normalizedMemory.chapterMemoryEnabled) {
@@ -1584,7 +1586,7 @@ function App() {
           className={`rpg-stage ${choicesVisible ? 'selection' : currentSegment?.type === 'dialogue' ? 'dialogue' : 'narration'}`}
           role={canAdvance ? 'button' : undefined}
           tabIndex={canAdvance ? 0 : undefined}
-          onClick={advanceSegment}
+          onClick={(event) => { if (protocolAlertKey) { event.stopPropagation(); setProtocolAlertKey(null); return } advanceSegment() }}
           onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') advanceSegment() }}
         >
           <div className="stage-context" aria-label="当前剧情状态">
@@ -1620,7 +1622,7 @@ function App() {
           {(!hasUsableProvider || error || protocolAlertKey) && <div className="stage-alerts" aria-live="polite">
             {!hasUsableProvider && <div className="stage-alert error"><span>尚未设置LLM，请在左上角菜单的全局设置中设置可用的大语言模型AI接口</span></div>}
             {error && <div className="stage-alert error"><span>{error}</span><button onClick={(event) => { event.stopPropagation(); setError('') }} title="关闭错误提示"><X size={15} /></button></div>}
-            {protocolAlertKey && <div key={protocolAlertKey} className="stage-alert protocol">LLM存在异常输出，请检查Debug，建议撤回重新生成</div>}
+            {protocolAlertKey && <div key={protocolAlertKey} className="stage-alert protocol">LLM输出存在格式异常，可检查 <span className="alert-command">Debug-&gt;输出</span> 查看细节。建议继续下一轮对话前使用 <span className="alert-command">指令-&gt;尝试修正格式</span> 进行修复，或撤回重新输出。如果模型一直无法正确遵守格式，建议打开 <span className="alert-command">设置-&gt;错误格式以旁白处理</span> 开关。如不想再收到此提醒，可关闭 <span className="alert-command">设置-&gt;LLM输出不符合格式时提醒</span></div>}
           </div>}
           {choicesVisible ? (
             <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} narrativeModes={activeNarrativeModes} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} changedStatusCharacterIds={changedStatusIds} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} showContinuation={showChoiceContinuation} onContinue={() => void continueTruncatedResponse()} />
@@ -1662,7 +1664,7 @@ function App() {
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
       {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
-      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} onClose={() => setDebugOpen(false)} />}
+      {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} onClose={() => setDebugOpen(false)} />}
       {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponseFormat()} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} actionsDisabled={busy || !activeProvider} onSummarize={summarizeMemoryNow} onSummarizeExperiences={summarizeCharacterExperiencesNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
@@ -2025,7 +2027,7 @@ function StagePortraits({ actors, activeCharacterId, mode, onViewStatus, changed
       {visibleActors.map(({ character, portrait }, index) => {
         const active = activeCharacterId === character.id
         const inactive = Boolean(activeCharacterId) && !active
-        return <div className={`stage-portrait slot-${index + 1} has-image ${active ? 'active' : ''} ${inactive ? 'inactive' : ''}`} style={{ zIndex: zIndexById.get(character.id) ?? 1 }} key={character.id}>
+        return <div className={`stage-portrait slot-${index + 1} has-image ${active ? 'active' : ''} ${inactive ? 'inactive' : ''}`} key={character.id}>
           <img src={portraitSource(portrait.uri)} alt="" />
         </div>
       })}
@@ -2120,7 +2122,7 @@ function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: Re
 
 type DebugTab = 'input' | 'output' | 'memory' | 'experience'
 
-function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; onClose: () => void }) {
+function RawResponseDialog({ requestSegments, content, repairContent, memorySummaryEntries, inputTokens, outputTokens, characters, contentMode, onClose }: { requestSegments: DebugPromptSegment[]; content: string; repairContent?: string; memorySummaryEntries: MemorySummaryDebugEntry[]; inputTokens?: number; outputTokens?: number; characters: CharacterProfile[]; contentMode?: PortraitGroup; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<DebugTab>('input')
   const promptGroups = groupDebugPromptSegments(requestSegments)
   const experienceEntries = memorySummaryEntries.filter((entry) => entry.label.startsWith('角色经历整理：'))
@@ -2131,6 +2133,8 @@ function RawResponseDialog({ requestSegments, content, repairContent, memorySumm
   const memoryResponse = memoryEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
   const experienceRequest = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.request}`).join('\n\n')
   const experienceResponse = experienceEntries.map((entry) => `===== ${entry.label} =====\n${entry.response || '（尚未返回）'}`).join('\n\n')
+  const anomalyIndexes = protocolAnomalyLineIndexes(content, { characters, contentMode })
+  const anomalyRanges = protocolAnomalyExpressionRanges(content, { characters, contentMode })
   const shownInputTokens = activeTab === 'memory' ? memoryInputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.inputTokens === undefined ? total : (total ?? 0) + entry.inputTokens, undefined) : inputTokens
   const shownOutputTokens = activeTab === 'memory' ? memoryOutputTokens : activeTab === 'experience' ? experienceEntries.reduce<number | undefined>((total, entry) => entry.outputTokens === undefined ? total : (total ?? 0) + entry.outputTokens, undefined) : outputTokens
   return (
@@ -2161,8 +2165,8 @@ function RawResponseDialog({ requestSegments, content, repairContent, memorySumm
             </details>) : <p className="debug-empty">当前RPG还没有请求记录。</p>}
           </div>}
           {activeTab === 'output' && <section className="debug-section debug-output-section">
-            <h3>LLM 返回的原始输出</h3>
-            <pre className="debug-response">{content || '当前RPG还没有 LLM 返回内容。'}{repairContent ? `\n\n===== 自动补选项返回原文 =====\n${repairContent}` : ''}</pre>
+            <h3>LLM 返回的原始输出（红色为异常格式）</h3>
+            <pre className="debug-response">{content ? content.split(/\n/).map((line, index, lines) => { const ranges = anomalyRanges.filter((range) => range.line === index); const parts = ranges.length ? [line.slice(0, ranges[0].start), <span className="debug-anomaly-line" key="anomaly">{line.slice(ranges[0].start, ranges[0].end)}</span>, line.slice(ranges[0].end)] : [line]; return <span className={anomalyIndexes.includes(index) && !ranges.length ? 'debug-anomaly-line' : undefined} key={`${index}-${line}`}>{parts}{index < lines.length - 1 ? '\n' : ''}</span> }) : '当前RPG还没有 LLM 返回内容。'}{repairContent ? `\n\n===== 自动补选项返回原文 =====\n${repairContent}` : ''}</pre>
           </section>}
           {activeTab === 'memory' && <div className="debug-memory-sections">
             <section className="debug-section"><h3>发送给记忆总结 LLM 的要求</h3><pre className="debug-response">{memoryRequest || '本轮对话没有触发记忆总结。'}</pre></section>

@@ -4,7 +4,7 @@ import { createDefaultAiSettings } from './game'
 describe('createDefaultAiSettings', () => {
   it('uses a conservative default temperature without a provider', () => {
     expect(createDefaultAiSettings().temperature).toBe(0.5)
-    expect(createDefaultAiSettings().warnOnProtocolAnomaly).toBe(false)
+    expect(createDefaultAiSettings().warnOnProtocolAnomaly).toBe(true)
   })
 
   it('uses the RPG defaults instead of inheriting the provider output limit', () => {
@@ -24,6 +24,6 @@ describe('createDefaultAiSettings', () => {
 
     expect(settings.maxTokens).toBe(10000)
     expect(settings.contextTurns).toBe(15)
-    expect(settings.warnOnProtocolAnomaly).toBe(false)
+    expect(settings.warnOnProtocolAnomaly).toBe(true)
   })
 })

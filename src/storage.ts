@@ -63,7 +63,7 @@ export async function loadState(): Promise<Partial<PersistedState>> {
       note: legacy.note ?? '',
       narrativeModes: legacy.narrativeModes ?? DEFAULT_NARRATIVE_MODES.map((mode) => ({ ...mode })),
       newStoryChoiceCount: normalizeNewStoryChoiceCount(legacy.newStoryChoiceCount),
-      aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings },
+      aiSettings: { ...createDefaultAiSettings(fallbackProvider), ...legacy.aiSettings, warnOnProtocolAnomaly: legacy.aiSettings?.warnOnProtocolAnomaly ?? false },
       storyStylePrompt: legacy.storyStylePrompt ?? legacy.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       modeStoryStylePrompts: legacy.modeStoryStylePrompts ?? {},
       chapterTransitionRules: legacy.chapterTransitionRules ?? '',

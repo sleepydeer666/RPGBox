@@ -404,7 +404,10 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
               <label>对话轮数<input type="number" min="1" max="100" step="1" value={contextTurnsDraft} onChange={(event) => setContextTurnsDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
               <label>主记忆章节数<input type="number" min="1" max="20" step="1" value={memoryLimitDraft} onChange={(event) => setMemoryLimitDraft(event.target.value)} onBlur={() => commitNumericSettings()} /></label>
             </div>
-            <div className="form-section"><h3>输出检查</h3><label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label></div>
+            <div className="form-section"><h3>输出检查</h3>
+              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.treatMalformedLinesAsNarration ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, treatMalformedLinesAsNarration: event.target.checked, ...(event.target.checked ? { warnOnProtocolAnomaly: false } : {}) } })} /><span><strong>错误格式以旁白处理</strong><small>针对如deepseek flash等格式遵守能力较弱的模型，激活此功能将把所有错误格式文本作为旁白显示。</small></span></label>
+              <label className="setting-toggle"><input type="checkbox" checked={game.aiSettings.warnOnProtocolAnomaly ?? false} disabled={game.aiSettings.treatMalformedLinesAsNarration ?? false} onChange={(event) => patchGame({ aiSettings: { ...game.aiSettings, warnOnProtocolAnomaly: event.target.checked } })} /><span><strong>LLM输出不符合格式时提醒</strong></span></label>
+            </div>
           </section>}
 
           {tab === 'rules' && <section className="game-tab-panel">

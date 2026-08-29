@@ -250,7 +250,7 @@ textarea:focus-visible {
 }
 
 .stage-alerts {
-  width: min(480px, calc(100% - 24px));
+  width: min(620px, calc(100% - 24px));
   position: absolute;
   z-index: 30;
   top: 48px;
@@ -263,8 +263,8 @@ textarea:focus-visible {
 
 .stage-alert {
   min-width: 0;
-  max-height: 96px;
-  padding: 9px 11px;
+  max-height: 220px;
+  padding: 13px 15px;
   overflow-y: auto;
   border: 1px solid rgba(255, 154, 145, 0.72);
   border-radius: 5px;
@@ -272,8 +272,8 @@ textarea:focus-visible {
   color: #ffe1dd;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(4px);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
@@ -304,12 +304,7 @@ textarea:focus-visible {
 }
 
 .stage-alert.protocol {
-  animation: protocol-alert-lifecycle 5s ease forwards;
-}
-
-@keyframes protocol-alert-lifecycle {
-  0%, 80% { opacity: 1; }
-  100% { opacity: 0; }
+  pointer-events: auto;
 }
 
 .rpg-stage[role='button'] {
@@ -681,6 +676,7 @@ textarea:focus-visible {
 .choice-scene {
   width: min(920px, 100%);
 }
+.alert-command { color: #e06a6a; }
 
 .desktop-runtime .story-scene {
   width: min(1440px, 100%);
@@ -2006,6 +2002,7 @@ textarea:focus-visible {
   display: grid;
   gap: 10px;
 }
+.debug-anomaly-line { color: #e06a6a; }
 
 .llm-special-instructions-section + .llm-special-instructions-section {
   padding-top: 16px;

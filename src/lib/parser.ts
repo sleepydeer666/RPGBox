@@ -65,6 +65,7 @@ export interface ResponseParseContext {
   contentMode?: PortraitGroup
   initialContentMode?: PortraitGroup
   narrativeModes?: NarrativeMode[]
+  treatMalformedLinesAsNarration?: boolean
 }
 
 interface ParsedStatusLine {
@@ -155,6 +156,27 @@ function parseDialogueLine(line: string, context: ResponseParseContext): StorySe
   }
 }
 
+function invalidExpressionRange(line: string, context: ResponseParseContext): { start: number; end: number } | undefined {
+  const match = line.match(DIALOGUE_LINE_PATTERN)
+  if (!match) return undefined
+  const character = findCharacter(context, match[1].trim())
+  if (!character?.portraits?.length) return undefined
+  if (!context.contentMode) return undefined
+  const allowed = new Set(character.portraits.filter((portrait) => (portrait.groups ?? ['normal']).includes(context.contentMode!)).flatMap((portrait) => portrait.tags?.length ? portrait.tags : [portrait.expression]).filter(Boolean).map((tag) => tag.trim().toLocaleLowerCase()))
+  const requested = match[2].trim().split(/[、,，/\s]+/u).filter(Boolean)
+  if (!requested.length || requested.every((tag) => allowed.has(tag.toLocaleLowerCase()))) return undefined
+  const contentStart = match.index! + match[0].indexOf(match[2])
+  return { start: contentStart, end: contentStart + match[2].length }
+}
+
+export function protocolAnomalyExpressionRanges(raw: string, context: ResponseParseContext = {}): Array<{ line: number; start: number; end: number }> {
+  const story = visibleStory(raw)
+  return story.split(/\n/).flatMap((line, lineIndex) => {
+    const range = invalidExpressionRange(line, context)
+    return range ? [{ line: lineIndex, ...range }] : []
+  })
+}
+
 function isSegmentLine(line: string, context: ResponseParseContext): boolean {
   return NARRATION_LINE_PATTERN.test(line) || Boolean(parseDialogueLine(line, context))
 }
@@ -177,11 +199,39 @@ export function normalizeProtocolResponse(raw: string, context: ResponseParseCon
   const gameData = raw.match(GAME_DATA_PATTERN)?.[0]
   const originalStory = raw.replace(GAME_DATA_PATTERN, '')
   const story = recoverStatusAfterUnformattedPrefix(originalStory)
-  if (!context.characters?.length && story === originalStory) return raw
-  const normalized = context.characters?.length
+  if (!context.characters?.length && story === originalStory && !context.treatMalformedLinesAsNarration) return raw
+  let normalized = context.characters?.length
     ? story.split(/\n/).map((line) => normalizeMalformedDialogueLine(line, context)).join('\n')
     : story
+  if (context.treatMalformedLinesAsNarration) {
+    let choicesStarted = false
+    normalized = normalized.split(/\n/).map((line) => {
+      const trimmed = line.trim()
+      if (CHOICE_LINE_SINGLE_PATTERN.test(trimmed)) { choicesStarted = true; return line }
+      if (choicesStarted) return line
+      if (!trimmed || isProtocolLine(trimmed, context)) return line
+      return `[旁白] ${trimmed}`
+    }).join('\n')
+  }
   return `${normalized}${gameData ? `\n${gameData}` : ''}`.trim()
+}
+
+function isProtocolLine(line: string, context: ResponseParseContext): boolean {
+  return CHOICE_LINE_SINGLE_PATTERN.test(line) || isStateLine(line) || isProgressLine(line)
+    || NARRATION_LINE_PATTERN.test(line) || Boolean(parseDialogueLine(line, context))
+}
+
+export function protocolAnomalyLineIndexes(raw: string, context: ResponseParseContext = {}): number[] {
+  const story = visibleStory(normalizeProtocolResponse(raw, { ...context, treatMalformedLinesAsNarration: false }))
+  let choicesStarted = false
+  return story.split(/\n/).map((line, index) => {
+    const trimmed = line.trim()
+    if (CHOICE_LINE_SINGLE_PATTERN.test(trimmed)) { choicesStarted = true; return -1 }
+    const invalid = choicesStarted
+      ? !isLooseStatusLine(trimmed, context) && !isStateLine(trimmed) && !isProgressLine(trimmed)
+      : !isProtocolLine(trimmed, context)
+    return trimmed && invalid ? index : -1
+  }).filter((index) => index >= 0)
 }
 
 function isProgressLine(line: string): boolean {
@@ -217,7 +267,17 @@ function extractNarrativeModeSwitchIndexes(story: string, context: ResponseParse
 
 function extractCharacterStatusUpdates(story: string, context: ResponseParseContext): CharacterStatusUpdate[] {
   const updates = new Map<string, CharacterStatusUpdate>()
+  let choicesStarted = false
   for (const line of story.split(/\n+/)) {
+    if (CHOICE_LINE_SINGLE_PATTERN.test(line)) {
+      choicesStarted = true
+      continue
+    }
+    if (choicesStarted) {
+      const loose = parseLooseCharacterStatusLine(line, context)
+      if (loose) updates.set(loose.characterId, loose)
+      continue
+    }
     const match = line.match(CHARACTER_STATUS_LINE_PATTERN)
     if (!match) continue
     const character = findCharacter(context, match[1].trim())
@@ -226,6 +286,20 @@ function extractCharacterStatusUpdates(story: string, context: ResponseParseCont
     updates.set(character.id, { characterId: character.id, characterName: character.name, status })
   }
   return Array.from(updates.values())
+}
+
+function parseLooseCharacterStatusLine(line: string, context: ResponseParseContext): CharacterStatusUpdate | undefined {
+  const match = line.trim().match(/^(.+?)[：:]\s*(.+)$/u)
+  if (!match) return undefined
+  const label = match[1].trim()
+  const status = match[2].trim()
+  if (!label || !status) return undefined
+  const character = context.characters?.filter((item) => label.includes(item.name) || label.includes(item.id)).sort((a, b) => b.name.length - a.name.length)[0]
+  return character ? { characterId: character.id, characterName: character.name, status } : undefined
+}
+
+function isLooseStatusLine(line: string, context: ResponseParseContext): boolean {
+  return Boolean(parseLooseCharacterStatusLine(line, context))
 }
 
 function extractProgressEvents(story: string): ProgressEvent[] {
@@ -241,8 +315,10 @@ function extractProgressEvents(story: string): ProgressEvent[] {
 
 function extractSimpleSegments(story: string, context: ResponseParseContext): StorySegment[] {
   const segments: StorySegment[] = []
+  let choicesStarted = false
   for (const line of story.split(/\n+/).map((text) => text.trim()).filter(Boolean)) {
-    if (CHOICE_LINE_SINGLE_PATTERN.test(line) || isStateLine(line) || isProgressLine(line)) continue
+    if (CHOICE_LINE_SINGLE_PATTERN.test(line)) { choicesStarted = true; continue }
+    if (choicesStarted || isStateLine(line) || isProgressLine(line)) continue
     const narration = line.match(NARRATION_LINE_PATTERN)
     if (narration) {
       segments.push({ type: 'narration', text: narration[1].trim() })
@@ -357,7 +433,10 @@ export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = 
   const lines = normalized.split(/\n+/).map((line) => line.trim()).filter((line) => !VISUAL_BLANK_LINE_PATTERN.test(line))
 
   let narrativeModeSwitched = false
+  let choicesStarted = false
   return lines.some((line, index) => {
+    if (CHOICE_LINE_SINGLE_PATTERN.test(line)) { choicesStarted = true; return false }
+    if (choicesStarted) return !isStateLine(line) && !isProgressLine(line) && !isLooseStatusLine(line, context)
     if (parseStatusLine(line)) return false
     if (NARRATIVE_MODE_SWITCH_PATTERN.test(line)) {
       const expected = context.contentMode
@@ -376,7 +455,8 @@ export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = 
     const dialogue = line.match(DIALOGUE_LINE_PATTERN)
     if (!dialogue) return index !== lines.length - 1 || !isPlausiblyTruncatedProtocolLine(line, context)
     if (!context.characters?.length) return false
-    return !context.characters.some((item) => item.name === dialogue[1].trim())
+    if (!context.characters.some((item) => item.name === dialogue[1].trim())) return true
+    return false
   })
 }
 
@@ -404,14 +484,13 @@ export function standardResponse(raw: string, context: ResponseParseContext = {}
   raw = normalizeProtocolResponse(raw, context)
   const gameData = raw.match(GAME_DATA_PATTERN)?.[0]
   const story = raw.replace(GAME_DATA_PATTERN, '')
-  const lines = story.split(/\n+/).map((line) => line.trim()).filter((line) =>
-    Boolean(line)
-    && (CHOICE_LINE_SINGLE_PATTERN.test(line)
-      || isStateLine(line)
-      || isProgressLine(line)
-      || NARRATION_LINE_PATTERN.test(line)
-      || Boolean(parseDialogueLine(line, context))),
-  )
+  let choicesStarted = false
+  const lines = story.split(/\n+/).map((line) => line.trim()).filter((line) => {
+    if (!line) return false
+    if (CHOICE_LINE_SINGLE_PATTERN.test(line)) { choicesStarted = true; return true }
+    if (choicesStarted) return isLooseStatusLine(line, context) || isStateLine(line) || isProgressLine(line)
+    return isStateLine(line) || isProgressLine(line) || NARRATION_LINE_PATTERN.test(line) || Boolean(parseDialogueLine(line, context))
+  })
   return [...lines, ...(gameData ? [gameData] : [])].join('\n').trim()
 }
 

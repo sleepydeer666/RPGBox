@@ -23,7 +23,8 @@ export function createDefaultAiSettings(provider?: ProviderProfile): GameAiSetti
     frequencyPenalty: provider?.frequencyPenalty ?? 0,
     maxTokens: 10000,
     contextTurns: 15,
-    warnOnProtocolAnomaly: false,
+    warnOnProtocolAnomaly: true,
+    treatMalformedLinesAsNarration: false,
   }
 }
 

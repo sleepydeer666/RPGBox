@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles.css'
 
-if ('rpgboxDesktop' in window) {
+if (window.rpgboxDesktop?.platform === 'desktop') {
   document.documentElement.classList.add('desktop-runtime')
 }
 
