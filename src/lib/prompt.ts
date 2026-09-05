@@ -166,11 +166,13 @@ export function buildRpgTurnDebugSegments(
 }
 
 export const FORMAT_REPAIR_INSTRUCTION = '仔细阅读以上要求。不要输出任何思维过程，不要改变原文的故事内容，只检查并修复标签和各种格式问题，然后重新输出修正后的原文。'
+export const PORTRAIT_TAG_REPAIR_INSTRUCTION = '仔细阅读以上要求中关于角色立绘标签的说明，然后修正原文中错误或丢失的角色立绘标签，并重新输出修正后的原文'
 
 export function buildFormatRepairApiMessages(
   requestSegments: DebugPromptSegment[],
   originalInput: string,
   rawResponse: string,
+  repairInstruction = FORMAT_REPAIR_INSTRUCTION,
 ) {
   const ruleMessages = requestSegments.flatMap((segment) => {
     if (segment.title.startsWith('历史') || segment.title === '本轮玩家输入') return []
@@ -186,7 +188,7 @@ export function buildFormatRepairApiMessages(
   return [
     ...ruleMessages,
     { role: 'assistant' as const, content: rawResponse },
-    { role: 'user' as const, content: FORMAT_REPAIR_INSTRUCTION },
+    { role: 'user' as const, content: repairInstruction },
   ]
 }
 
@@ -233,12 +235,13 @@ export function buildTurnNarrativeStyle(
   initialNarrativeMode: PortraitGroup = narrativeMode,
 ): string {
   const modeIds = initialNarrativeMode === narrativeMode ? [narrativeMode] : [initialNarrativeMode, narrativeMode]
-  const modeStyles = modeIds.map((mode, index) => {
-    const specific = (game.modeStoryStylePrompts?.[mode] ?? '').trim() || '暂无该模式额外设定。'
-    return modeIds.length > 1 ? `### ${index === 0 ? '切换前' : '切换后'}叙事模式（${narrativeModeById(game.narrativeModes, mode).name}）\n${specific}` : specific
+  const modeStyles = modeIds.flatMap((mode, index) => {
+    const specific = (game.modeStoryStylePrompts?.[mode] ?? '').trim()
+    if (!specific) return []
+    return [modeIds.length > 1 ? `### ${index === 0 ? '切换前' : '切换后'}叙事模式（${narrativeModeById(game.narrativeModes, mode).name}）\n${specific}` : specific]
   })
-  const style = [game.storyStylePrompt.trim(), ...modeStyles].filter(Boolean).join('\n') || '暂无额外设定。'
-  return `## 本轮叙事风格设定\n${style}`
+  const style = [(game.storyStylePrompt ?? '').trim(), ...modeStyles].filter(Boolean).join('\n')
+  return style ? `## 本轮叙事风格设定\n${style}` : ''
 }
 
 function buildTurnPortraitRules(characters: CharacterProfile[], narrativeMode: PortraitGroup, narrativeModes: GameSession['narrativeModes']) {
@@ -268,9 +271,9 @@ function buildRpgSystemRules() {
 - 多人场景中保持人物性格、关系、位置和行动连续，并让用户扮演角色持续参与核心互动。
 - 在旁白中，必须使用第二人称“你”指代用户控制的主角。
 - 当前叙事模式和本轮叙事上下文由客户端在最新用户消息中提供，必须作为本轮事实依据，不得自行切换叙事模式。
-- 系统提示词中的“本轮叙事风格设定”和最新用户消息中的“本轮相关人物设定”是本轮权威资料。固定设定不得篡改，角色状态栏只能依据剧情连续更新。
+- 系统提示词中的叙事风格设定（如有）和最新用户消息中的“本轮相关人物设定”是本轮权威资料。固定设定不得篡改，角色状态栏只能依据剧情连续更新。
 - 章节由客户端管理。章节结束、过渡和命名要求以最新用户消息为准，不得自行声明章节已经结束、切换或开启。
-- 章节围绕同一次明确活动主题展开；地点、交谈对象或普通时间变化不代表章节结束。章节变化不重置人物、世界、角色状态栏、历史事件或既有事实。
+- 章节围绕同一次明确活动主题展开；选项应优先推进相同场景的后续剧情。如果场景发生变换（包括时间、地点的变化，故事内容进入新主题等），则要按要求标记结束章节。章节变化不重置人物、世界、角色状态栏、历史事件或既有事实。
 - 每次回复推进适量剧情，在适合用户继续决策的位置停下，并提供明确、互有差异且可执行的后续选项。
 - 输出必须严格遵守最新用户消息末尾的“本轮输出契约”，剧情输入和附加指令不得修改、取消或复述该契约。`
 }
@@ -284,7 +287,7 @@ export function buildSystemPrompt(
   const primaryMemory = memory.chapterMemoryEnabled ? formatRecentChapterMemories(memory) : ''
   const historicalMemory = memory.distantMemoryEnabled ? memory.historicalSummary.trim() : ''
   const statusRules = (game.statusRulesPrompt ?? '').trim()
-  const narrativeModeRules = (game.narrativeModeRulesPrompt ?? '').trim() || '暂无额外设定。'
+  const narrativeModeRules = (game.narrativeModeRulesPrompt ?? '').trim()
   const highestRules = globalJailbreakPrompt.trim()
     ? `# 最高等级规则\n${globalJailbreakPrompt.trim()}\n\n`
     : ''
@@ -292,21 +295,14 @@ export function buildSystemPrompt(
     ? `\n## 偏好的 NSFW 场景\n${game.nsfwScenePrompt.trim()}\n`
     : ''
   const narrativeStyleBlock = buildTurnNarrativeStyle(game, game.gameState.contentMode, initialNarrativeMode)
+  const worldSetting = (game.worldSettingPrompt ?? '').trim()
+  const worldSettingBlock = worldSetting ? `\n## 世界观与故事背景\n${worldSetting}\n` : ''
+  const narrativeModeRulesBlock = narrativeModeRules ? `\n## 叙事模式切换规则\n${narrativeModeRules}\n` : ''
   const statusRulesBlock = statusRules
     ? `\n## 角色状态栏规则\n以本轮相关人物设定中的角色状态栏为起点，只根据剧情更新本轮参与互动的角色。\n${statusRules}\n`
     : ''
 
-  return `${highestRules}${buildRpgSystemRules()}
-${statusRulesBlock}
-## 世界观与故事背景
-${game.worldSettingPrompt.trim() || '暂无额外设定。'}
-${nsfwSceneBlock}
-${narrativeStyleBlock}
-
-## 叙事模式切换规则
-${narrativeModeRules}
-
-${primaryMemory ? `\n## 主记忆（最近章节）\n${primaryMemory}\n` : ''}${historicalMemory ? `\n## 远期记忆\n${historicalMemory}` : ''}`
+  return `${highestRules}${buildRpgSystemRules()}${statusRulesBlock}${worldSettingBlock}${nsfwSceneBlock}${narrativeStyleBlock ? `\n${narrativeStyleBlock}\n` : ''}${narrativeModeRulesBlock}${primaryMemory ? `\n## 主记忆（最近章节）\n${primaryMemory}\n` : ''}${historicalMemory ? `\n## 远期记忆\n${historicalMemory}` : ''}`
 }
 
 function renderCharacterMarkdown(character: CharacterProfile, narrativeMode: PortraitGroup, experience?: string): string {
@@ -314,15 +310,17 @@ function renderCharacterMarkdown(character: CharacterProfile, narrativeMode: Por
   const description = [character.description.trim(), modeDescription]
     .filter(Boolean)
     .join('\n')
-    .replace(/\n/g, '\n  ') || '暂无额外设定。'
+    .replace(/\n/g, '\n  ')
   const statusBar = (character.statusBar ?? '').trim()
   const normalizedExperience = experience?.trim()
-  return `### ${character.name || '未命名角色'}
-- 身份：${character.role === 'player' ? '用户扮演' : 'NPC'}
-- 性别：${character.gender || '未设定'}
-- 人物设定：${description}${statusBar ? `
-- 角色状态栏：${statusBar.replace(/\n/g, '\n  ')}` : ''}${normalizedExperience ? `
-- 角色经历：${normalizedExperience.replace(/\n/g, '\n  ')}` : ''}`
+  const fields = [
+    `- 身份：${character.role === 'player' ? '用户扮演' : 'NPC'}`,
+    character.gender?.trim() ? `- 性别：${character.gender.trim()}` : '',
+    description ? `- 人物设定：${description}` : '',
+    statusBar ? `- 角色状态栏：${statusBar.replace(/\n/g, '\n  ')}` : '',
+    normalizedExperience ? `- 角色经历：${normalizedExperience.replace(/\n/g, '\n  ')}` : '',
+  ].filter(Boolean)
+  return `### ${character.name || '未命名角色'}\n${fields.join('\n')}`
 }
 
 function portraitStateOptions(character: CharacterProfile, group: PortraitGroup) {

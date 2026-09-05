@@ -116,6 +116,7 @@ export function createBlankGame(index: number, provider?: ProviderProfile): Game
     nsfwScenePrompt: '',
     worldSettingPrompt: '',
     characters: createDefaultCharacters('主要NPC'),
+    showStatusControls: true,
     messages: [{
       id: `opening-${now}`,
       role: 'assistant',

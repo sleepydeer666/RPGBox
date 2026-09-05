@@ -23,6 +23,9 @@ test('portable storage keeps profiles, RPG state, and portraits inside its root'
     ],
   }
   await storage.writeValue(APP_STATE_KEY, JSON.stringify(state))
+
+  await storage.writeDataFile('rpgbox-v2/global/example.json', JSON.stringify({ schemaVersion: 2, value: 'ok' }))
+  assert.deepEqual(JSON.parse(await storage.readDataFile('rpgbox-v2/global/example.json')), { schemaVersion: 2, value: 'ok' })
   await storage.writeValue('tutorial-seen', 'true')
   await storage.writeValue('tutorial-seen', 'true')
 

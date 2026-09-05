@@ -155,6 +155,19 @@ function createPortableStorage(rootDirectory) {
     return writeQueue
   }
 
+  async function readDataFile(relativePath) {
+    const target = resolveWithin(root, ...String(relativePath).split('/'))
+    const value = await readJsonWithBackup(target)
+    return value === null ? null : JSON.stringify(value)
+  }
+
+  function writeDataFile(relativePath, value) {
+    const target = resolveWithin(root, ...String(relativePath).split('/'))
+    const operation = () => atomicWriteJson(target, JSON.parse(value))
+    writeQueue = writeQueue.then(operation, operation)
+    return writeQueue
+  }
+
   async function savePortrait({ gameId: rawGameId, characterId: rawCharacterId, fileName, base64 }) {
     const gameId = safeId(rawGameId, 'RPG ID')
     const characterId = safeId(rawCharacterId, '角色 ID')
@@ -185,7 +198,7 @@ function createPortableStorage(rootDirectory) {
     await fs.rm(pathFromUri(uri), { force: true })
   }
 
-  return { ensure, readValue, writeValue, savePortrait, readPortrait, portraitResponse, deletePortrait, pathFromUri }
+  return { ensure, readValue, writeValue, readDataFile, writeDataFile, savePortrait, readPortrait, portraitResponse, deletePortrait, pathFromUri }
 }
 
 function portraitMimeType(filePath) {

@@ -229,6 +229,21 @@ describe('parseAssistantResponse', () => {
     expect(parsed.choices).toEqual([{ id: 'A', text: '回应' }])
   })
 
+  it('ignores standalone dash separators without treating them as protocol anomalies', () => {
+    const raw = '[旁白] 门外传来脚步声。\n---\n维纳斯（紧张）：别出声。\n---'
+    const context = { characters: [{ id: 'venus', name: '维纳斯', role: 'npc' as const }] }
+    expect(parseAssistantResponse(raw, context).segments).toEqual([
+      { type: 'narration', text: '门外传来脚步声。' },
+      { type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '紧张', text: '别出声。' },
+    ])
+    expect(hasProtocolAnomaly(raw, context)).toBe(false)
+    expect(standardResponse(raw, context)).toBe('[旁白] 门外传来脚步声。\n维纳斯（紧张）：别出声。')
+    expect(parseAssistantResponse(raw, { ...context, treatMalformedLinesAsNarration: true }).segments).toEqual([
+      { type: 'narration', text: '门外传来脚步声。' },
+      { type: 'dialogue', characterId: 'venus', characterName: '维纳斯', expression: '紧张', text: '别出声。' },
+    ])
+  })
+
   it('does not replace visible text segments when legacy game data closes', () => {
     const raw = '[旁白] 页面已经显示。\n<game-data>{"segments":[{"type":"narration","text":"旧数据替换内容"}],"choices":[]}</game-data>'
     const parsed = parseAssistantResponse(raw)

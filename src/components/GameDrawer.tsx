@@ -1,4 +1,4 @@
-import { ArchiveRestore, ArrowDown, ArrowUp, BookCopy, BookOpen, Check, Compass, Download, FileUp, Info, Pencil, Plus, Settings, Trash2, X } from 'lucide-react'
+import { ArchiveRestore, ArrowDown, ArrowUp, BookCopy, BookOpen, Check, Compass, Download, FileUp, Info, Moon, Pencil, Plus, Settings, Sun, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import packageJson from '../../package.json'
 import type { BundledRpgPreset } from '../lib/bundledRpg'
@@ -20,12 +20,14 @@ export interface GameDrawerProps {
   onUpdateMetadata: (id: string, title: string) => void
   onDelete: (id: string) => Promise<void>
   onClone: (id: string) => Promise<void>
-  onExport: (id: string, options: RpgExportOptions) => Promise<string>
+  onExport: (id: string, options: RpgExportOptions, onPortraitProgress?: (completed: number, total: number) => void) => Promise<string>
   bundledRpgPresets: BundledRpgPreset[]
   bundledRpgImportKeys: string[]
   onImportBundledRpg: (key: string, onPortraitProgress?: (completed: number, total: number) => void) => Promise<void>
   onOpenSettings: () => void
   onStartOnboarding: () => void
+  lightMode: boolean
+  onToggleLightMode: () => void
 }
 
 export default function GameDrawer(props: GameDrawerProps) {
@@ -41,6 +43,7 @@ export default function GameDrawer(props: GameDrawerProps) {
   const [exportGame, setExportGame] = useState<GameSession | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [exportOptions, setExportOptions] = useState<RpgExportOptions>({ settings: true, characters: true })
+  const [exportProgress, setExportProgress] = useState<{ completed: number; total: number } | null>(null)
   const [working, setWorking] = useState(false)
   const [notice, setNotice] = useState('')
   const [actionError, setActionError] = useState('')
@@ -148,14 +151,19 @@ export default function GameDrawer(props: GameDrawerProps) {
     if (!window.confirm(`确认按当前选项导出“${exportGame.title}”？文件将保存到 ${RPGBOX_DIRECTORY_LABEL}。`)) return
     setWorking(true)
     setActionError('')
+    const portraitTotal = exportOptions.characters
+      ? exportGame.characters.reduce((total, character) => total + character.portraits.length, 0)
+      : 0
+    setExportProgress(portraitTotal > 0 ? { completed: 0, total: portraitTotal } : null)
     try {
-      const path = await props.onExport(exportGame.id, exportOptions)
+      const path = await props.onExport(exportGame.id, exportOptions, (completed, total) => setExportProgress({ completed, total }))
       setNotice(`已导出：${path}`)
       setExportGame(null)
     } catch (error) {
       setActionError(toMessage(error))
     } finally {
       setWorking(false)
+      setExportProgress(null)
     }
   }
 
@@ -164,7 +172,7 @@ export default function GameDrawer(props: GameDrawerProps) {
       <aside className={`game-drawer ${props.open ? 'open' : ''}`} aria-label="RPG目录">
         <div className="drawer-head">
           <div><span className="eyebrow">RPG LIBRARY</span><h2>RPG目录</h2></div>
-          <button className="icon-button" onClick={props.onClose} title="关闭RPG目录"><X size={19} /></button>
+          <div className="drawer-head-actions"><button className="theme-toggle-button" onClick={props.onToggleLightMode} title={props.lightMode ? '切换为夜间模式' : '切换为白天模式'} aria-label={props.lightMode ? '切换为夜间模式' : '切换为白天模式'}>{props.lightMode ? <Moon size={18} /> : <Sun size={18} />}</button><button className="icon-button" onClick={props.onClose} title="关闭RPG目录"><X size={19} /></button></div>
         </div>
         <button className="new-game-button" onClick={openCreateDialog}><Plus size={17} />新建RPG</button>
         <div className={`drawer-notice ${actionError ? 'error' : ''}`}>{actionError || notice}</div>
@@ -194,7 +202,7 @@ export default function GameDrawer(props: GameDrawerProps) {
           ))}
         </nav>
         <div className="drawer-footer-actions">
-          <button onClick={props.onOpenSettings}><Settings size={19} /><span>全局设置</span></button>
+          <button onClick={props.onOpenSettings}><Settings size={19} /><span>AI配置</span></button>
           <button onClick={openPresetDialog}><ArchiveRestore size={19} /><span>导入预设</span></button>
           <button onClick={props.onStartOnboarding} disabled={!props.games.length} title={props.games.length ? '打开新手导航' : '请先创建或导入 RPG'}><Compass size={19} /><span>新手导航</span></button>
           <button onClick={() => setAboutOpen(true)}><Info size={19} /><span>关于</span></button>
@@ -203,7 +211,7 @@ export default function GameDrawer(props: GameDrawerProps) {
       {props.open && <button className="drawer-backdrop" onClick={props.onClose} aria-label="关闭RPG目录" />}
       {createOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="新建RPG"><button className="backdrop" onClick={() => !working && setCreateOpen(false)} aria-label="取消新建" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">NEW RPG</span><h2>新建RPG</h2></div><button className="icon-button" onClick={() => setCreateOpen(false)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content"><label>RPG 名称<input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} placeholder={`留空使用“新RPG ${props.games.length + 1}”`} /></label><div className="system-file-picker"><span>导入 RPGBox 文件</span><label className="secondary-button"><FileUp size={16} />{pickedImportFile?.name ?? '选择文件'}<input type="file" accept=".rpgbox,application/zip,application/octet-stream" hidden onChange={(event) => { setPickedImportFile(event.target.files?.[0] ?? null); event.target.value = '' }} /></label>{pickedImportFile && <button type="button" className="text-button" onClick={() => setPickedImportFile(null)}>取消选择</button>}</div><p className="directory-note">可从 <strong>{RPGBOX_DIRECTORY_LABEL}</strong>、下载目录或其他位置选择 `.rpgbox` 文件；不选择文件则建立空白 RPG。</p>{working && pickedImportFile && importProgress && <PortraitImportProgress progress={importProgress} label="正在解压立绘" />}{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>{pickedImportFile ? `已选择 ${pickedImportFile.name}` : '未选择文件，将建立空白 RPG'}</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setCreateOpen(false)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmCreate()} disabled={working}>{working ? '导入中' : '确认新建'}</button></div></div></section></div>}
       {presetOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="导入预设RPG"><button className="backdrop" onClick={() => !working && setPresetOpen(false)} aria-label="取消导入预设" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">IMPORT PRESET</span><h2>导入预设 RPG</h2></div><button className="icon-button" onClick={() => setPresetOpen(false)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content">{props.bundledRpgPresets.length ? <div className="preset-rpg-list" role="radiogroup" aria-label="选择预设 RPG">{props.bundledRpgPresets.map((preset) => <label className={`preset-rpg-option ${selectedPresetKey === preset.key ? 'selected' : ''}`} key={preset.key}><input type="radio" name="bundled-rpg" value={preset.key} checked={selectedPresetKey === preset.key} onChange={() => setSelectedPresetKey(preset.key)} disabled={working} /><span><strong>{preset.title}</strong><small>{preset.portraitCount} 张立绘{preset.hasNsfw ? ' · 包含 NSFW 设置' : ''}</small></span>{props.bundledRpgImportKeys.includes(preset.key) && <em>已导入</em>}</label>)}</div> : <div className="preset-rpg-empty">当前安装包没有可用的预设 RPG</div>}{working && presetProgress && <PortraitImportProgress progress={presetProgress} label="正在导入预设立绘" />}{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>导入后会创建独立 RPG，不覆盖已有内容</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setPresetOpen(false)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmPresetImport()} disabled={working || !selectedPresetKey}>{working ? '导入中' : '确认导入'}</button></div></div></section></div>}
-      {exportGame && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="导出RPG"><button className="backdrop" onClick={() => !working && setExportGame(null)} aria-label="取消导出" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT RPGBOX</span><h2>导出“{exportGame.title}”</h2></div><button className="icon-button" onClick={() => setExportGame(null)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content export-option-list"><label><input type="checkbox" checked={exportOptions.settings} onChange={(event) => setExportOptions((current) => ({ ...current, settings: event.target.checked }))} /><span><strong>RPG 设置</strong><small>提示词、剧情记录、状态、章节、记忆及场景偏好，不包含AI配置</small></span></label><label><input type="checkbox" checked={exportOptions.characters} onChange={(event) => setExportOptions((current) => ({ ...current, characters: event.target.checked }))} /><span><strong>角色</strong><small>完整人物资料、颜色、状态栏及全部叙事模式立绘资源</small></span></label><p className="directory-note">文件将保存到 <strong>{RPGBOX_DIRECTORY_LABEL}</strong>，扩展名为 `.rpgbox`。AI接口、密钥、模型及参数不会导出。</p>{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>包内包含 rpg.xml 和所选立绘资源</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportGame(null)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmExport()} disabled={working || (!exportOptions.settings && !exportOptions.characters)}>{working ? '导出中' : '确认导出'}</button></div></div></section></div>}
+      {exportGame && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-label="导出RPG"><button className="backdrop" onClick={() => !working && setExportGame(null)} aria-label="取消导出" /><section className="modal drawer-dialog"><div className="modal-head"><div><span className="eyebrow">EXPORT RPGBOX</span><h2>导出“{exportGame.title}”</h2></div><button className="icon-button" onClick={() => setExportGame(null)} disabled={working} title="关闭"><X size={19} /></button></div><div className="drawer-dialog-content export-option-list"><label><input type="checkbox" checked={exportOptions.settings} onChange={(event) => setExportOptions((current) => ({ ...current, settings: event.target.checked }))} /><span><strong>RPG 设置</strong><small>提示词、剧情记录、状态、章节、记忆及场景偏好，不包含AI配置</small></span></label><label><input type="checkbox" checked={exportOptions.characters} onChange={(event) => setExportOptions((current) => ({ ...current, characters: event.target.checked }))} /><span><strong>角色</strong><small>完整人物资料、颜色、状态栏及全部叙事模式立绘资源</small></span></label><p className="directory-note">文件将保存到 <strong>{RPGBOX_DIRECTORY_LABEL}</strong>，扩展名为 `.rpgbox`。AI接口、密钥、模型及参数不会导出。</p>{working && exportProgress && <PortraitImportProgress progress={exportProgress} label="正在打包立绘" />}{actionError && <div className="inline-error">{actionError}</div>}</div><div className="modal-footer"><span>包内包含 rpg.xml 和所选立绘资源</span><div className="modal-footer-actions"><button className="secondary-button" onClick={() => setExportGame(null)} disabled={working}>取消</button><button className="primary-button" onClick={() => void confirmExport()} disabled={working || (!exportOptions.settings && !exportOptions.characters)}>{working ? '导出中' : '确认导出'}</button></div></div></section></div>}
       {aboutOpen && <div className="modal-layer drawer-dialog-layer" role="dialog" aria-modal="true" aria-labelledby="about-title"><button className="backdrop" onClick={() => setAboutOpen(false)} aria-label="关闭关于" /><section className="modal about-modal"><div className="modal-head"><div><span className="eyebrow">ABOUT RPGBOX</span><h2 id="about-title">关于</h2></div><button className="icon-button" onClick={() => setAboutOpen(false)} title="关闭"><X size={19} /></button></div><div className="about-content"><div><span>当前版本</span><strong>v{packageJson.version}</strong></div><div><span>GitHub 仓库</span><a href={REPOSITORY_URL} target="_blank" rel="noreferrer">{REPOSITORY_URL}</a></div></div><div className="modal-footer"><span>RPGBox</span><button className="primary-button" onClick={() => setAboutOpen(false)}>完成</button></div></section></div>}
     </>
   )
@@ -215,7 +223,7 @@ function toMessage(error: unknown) {
 
 function PortraitImportProgress({ progress, label }: { progress: { completed: number; total: number }; label: string }) {
   const percent = progress.total ? Math.round(progress.completed / progress.total * 100) : 0
-  return <div className="portrait-import-status" aria-live="polite"><div><span>{label}</span><strong>{progress.total ? `${progress.completed} / ${progress.total}` : '正在读取包内容'}</strong></div><div className="library-import-progress" aria-label={`立绘导入进度 ${percent}%`}><span style={{ width: `${percent}%` }} /></div></div>
+  return <div className="portrait-import-status" aria-live="polite"><div><span>{label}</span><strong>{progress.total ? `${progress.completed} / ${progress.total}` : '正在读取包内容'}</strong></div><div className="library-import-progress" aria-label={`立绘处理进度 ${percent}%`}><span style={{ width: `${percent}%` }} /></div></div>
 }
 
 function GameCharacterSummary({ game }: { game: GameSession }) {

@@ -37,7 +37,7 @@ describe('buildHistoryLines', () => {
     expect(lines).toEqual([
       { id: 'assistant-1-0', type: 'narration', speaker: undefined, characterId: undefined, text: '走入酒馆。' },
       { id: 'assistant-1-1', type: 'dialogue', speaker: '莉亚', characterId: 'lia', text: '这里适合打听情报。' },
-      { id: 'user-1', type: 'player', speaker: '用户指令', characterId: undefined, text: '先观察酒馆四周，但是先观察四周' },
+      { id: 'user-1', type: 'player', speaker: '用户指令', characterId: undefined, text: 'A：先观察酒馆四周；补充指令：先观察四周' },
     ])
   })
 
@@ -49,14 +49,30 @@ describe('buildHistoryLines', () => {
         createdAt: 1,
         content: '<game-data>{"segments":[],"choices":[{"id":"A","text":"推开房门"},{"id":"B","text":"询问莉亚"}]}</game-data>',
       },
-      { id: 'user-1', role: 'user', createdAt: 2, content: 'AB' },
-      { id: 'user-2', role: 'user', createdAt: 3, content: '我决定从窗户离开' },
+      { id: 'user-1', role: 'user', createdAt: 2, content: 'AB', selectedChoiceIds: ['A', 'B'], customInput: '' },
+      { id: 'user-2', role: 'user', createdAt: 3, content: '我决定从窗户离开', selectedChoiceIds: [], customInput: '我决定从窗户离开' },
     ])
 
     expect(lines.map((line) => line.text)).toEqual([
-      '推开房门；询问莉亚',
+      'A：推开房门；B：询问莉亚',
       '我决定从窗户离开',
     ])
+  })
+
+  it('uses stored choice text when a history page starts with user input', () => {
+    const lines = buildHistoryLines([
+      {
+        id: 'user-1',
+        role: 'user',
+        createdAt: 1,
+        content: 'B，但是保持警惕',
+        selectedChoiceIds: ['B'],
+        selectedChoiceTexts: { B: '进入地下室' },
+        customInput: '保持警惕',
+      },
+    ])
+
+    expect(lines[0].text).toBe('B：进入地下室；补充指令：保持警惕')
   })
 
   it('can omit the currently streaming assistant message', () => {

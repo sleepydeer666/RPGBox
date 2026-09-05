@@ -133,8 +133,8 @@ export async function streamCompletion({
     body: JSON.stringify({
       model: provider.model.trim(),
       messages,
-      temperature: provider.temperature,
-      top_p: provider.topP,
+      ...(provider.temperature > 0 ? { temperature: provider.temperature } : {}),
+      ...(provider.topP > 0 ? { top_p: provider.topP } : {}),
       max_tokens: provider.maxTokens,
       stream: true,
       stream_options: { include_usage: true },

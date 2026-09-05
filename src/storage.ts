@@ -5,7 +5,11 @@ import { normalizeMemoryState } from './lib/memory'
 import { normalizeNewStoryChoiceCount } from './lib/prompt'
 import { DEFAULT_NARRATIVE_MODES, normalizeGameNarrativeModes } from './lib/narrativeModes'
 import type { ChatMessage, GameSession, GameState, NarrativeProgress, ProviderProfile } from './types'
-import { readStoredState, writeStoredState } from './platform/stateStore'
+import { readStoredState } from './platform/stateStore'
+import { migrateLegacyState, readV2State, writeV2State } from './platform/rpgFileStore'
+import { isStoredPortraitUri } from './platform/rpgFileStore'
+import { copyPortraitFile, readPortraitBase64, savePortraitBase64 } from './lib/portraits'
+import { isAndroidRuntime, isDesktopRuntime } from './platform/runtime'
 
 const KEY = 'rpgbox-state-v1'
 
@@ -16,6 +20,7 @@ export interface PersistedState {
   games: GameSession[]
   activeGameId: string
   bundledRpgImportKeys: string[]
+  lightMode?: boolean
 }
 
 interface LegacyState {
@@ -26,7 +31,14 @@ interface LegacyState {
 }
 
 export async function loadState(): Promise<Partial<PersistedState>> {
-  const value = await readStoredState(KEY)
+  let v2State: PersistedState | null = null
+  try {
+    v2State = await readV2State()
+  } catch {
+    // A retained v1 backup remains the recovery source until v2 is readable.
+  }
+  const legacyValue = v2State ? null : await readStoredState(KEY)
+  const value = v2State ? JSON.stringify(v2State) : legacyValue
   if (!value) return {}
   try {
     const parsed = JSON.parse(value) as Partial<PersistedState> & LegacyState
@@ -112,14 +124,34 @@ export async function loadState(): Promise<Partial<PersistedState>> {
     if (!parsed.activeGameId || !parsed.games.some((game) => game.id === parsed.activeGameId)) {
       parsed.activeGameId = parsed.games[0]?.id ?? ''
     }
-    return {
+    const normalized: Partial<PersistedState> = {
       providers: parsed.providers,
       activeProviderId: parsed.activeProviderId,
       globalJailbreakPrompt: parsed.globalJailbreakPrompt ?? '',
       games: parsed.games,
       activeGameId: parsed.activeGameId,
       bundledRpgImportKeys: parsed.bundledRpgImportKeys ?? [],
+      lightMode: parsed.lightMode ?? false,
     }
+    const migratedPortraits = await migratePortraitStorage(normalized.games ?? [])
+    if (migratedPortraits) normalized.games = migratedPortraits
+    if ((!v2State || migratedPortraits) && (legacyValue || migratedPortraits)) {
+      const defaults = createInitialProviderState()
+      try {
+        await migrateLegacyState(legacyValue ?? JSON.stringify(normalized), {
+          providers: normalized.providers ?? defaults.providers,
+          activeProviderId: normalized.activeProviderId ?? defaults.activeProviderId,
+          globalJailbreakPrompt: normalized.globalJailbreakPrompt ?? '',
+          games: normalized.games ?? [],
+          activeGameId: normalized.activeGameId ?? '',
+          bundledRpgImportKeys: normalized.bundledRpgImportKeys ?? [],
+          lightMode: normalized.lightMode ?? false,
+        })
+      } catch {
+        // Keep the legacy state usable; the migration will retry on the next launch.
+      }
+    }
+    return normalized
   } catch {
     return {}
   }
@@ -148,7 +180,32 @@ function chapterOnlyNarrative(narrative: NarrativeProgress | undefined, fallback
 }
 
 export async function saveState(state: PersistedState): Promise<void> {
-  await writeStoredState(KEY, JSON.stringify(state))
+  await writeV2State(state)
+}
+
+async function migratePortraitStorage(games: GameSession[]): Promise<GameSession[] | null> {
+  if (!isAndroidRuntime() && !isDesktopRuntime()) return null
+  let changed = false
+  const migrated = await Promise.all(games.map(async (game) => {
+    const characters = await Promise.all(game.characters.map(async (character) => {
+      const portraits = await Promise.all(character.portraits.map(async (portrait) => {
+        if (isStoredPortraitUri(portrait.uri) || (isDesktopRuntime() && portrait.uri.startsWith('rpgbox-data:'))) return portrait
+        try {
+          const uri = portrait.uri.startsWith('data:') || portrait.uri.startsWith('blob:')
+            ? await savePortraitBase64(game.id, character.id, await readPortraitBase64(portrait.uri))
+            : await copyPortraitFile(portrait.uri, game.id, character.id)
+          changed = true
+          return { ...portrait, uri }
+        } catch {
+          // Keep an unreadable legacy URI so the app can still load the RPG and retry later.
+          return portrait
+        }
+      }))
+      return { ...character, portraits }
+    }))
+    return changed ? { ...game, characters } : game
+  }))
+  return changed ? migrated : null
 }
 
 export function createInitialProviderState() {

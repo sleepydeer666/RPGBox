@@ -63,6 +63,27 @@ describe('streamCompletion', () => {
     })
   })
 
+  it('omits temperature and top_p when their configured value is zero', async () => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+
+    await streamCompletion({
+      provider: { id: 'test', name: 'test', baseUrl: 'https://example.com/v1', apiKey: 'key', model: 'model', models: ['model'], temperature: 0, topP: 0, presencePenalty: 0, frequencyPenalty: 0, maxTokens: 100 },
+      messages: [],
+    })
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(requestBody).not.toHaveProperty('temperature')
+    expect(requestBody).not.toHaveProperty('top_p')
+    expect(requestBody.max_tokens).toBe(100)
+  })
+
   it('finishes when the provider sends finish_reason without closing the stream', async () => {
     const encoder = new TextEncoder()
     let cancelled = false

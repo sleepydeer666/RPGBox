@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampOffset, getImageLayout } from './PortraitCropDialog'
+import { clampOffset, getImageLayout, getPortraitOutputSize } from './PortraitCropDialog'
 
 describe('portrait crop geometry', () => {
   it('covers a fixed 2:3 crop frame without changing image ratio', () => {
@@ -12,5 +12,10 @@ describe('portrait crop geometry', () => {
   it('keeps dragging inside the covered image', () => {
     expect(clampOffset({ x: 999, y: -999 }, { width: 800, height: 600 }, { width: 400, height: 600 }))
       .toEqual({ x: 200, y: 0 })
+  })
+
+  it('downscales large manual imports without upscaling small ones', () => {
+    expect(getPortraitOutputSize(1200, 1800)).toEqual({ width: 800, height: 1200 })
+    expect(getPortraitOutputSize(600, 900)).toEqual({ width: 600, height: 900 })
   })
 })

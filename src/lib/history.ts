@@ -21,7 +21,7 @@ export function buildHistoryLines(messages: ChatMessage[], excludedMessageId?: s
         type: 'player',
         speaker: '用户指令',
         characterId: undefined,
-        text: expandSelectedChoices(message.content.trim(), previousChoices),
+        text: formatUserInput(message, previousChoices),
       })
       continue
     }
@@ -48,13 +48,37 @@ export function buildHistoryLines(messages: ChatMessage[], excludedMessageId?: s
   return lines
 }
 
-function expandSelectedChoices(content: string, choices: Choice[]): string {
+function formatUserInput(message: ChatMessage, choices: Choice[]): string {
+  const selectedIds = message.selectedChoiceIds ?? []
+  const supplement = message.customInput?.trim() ?? ''
+  if (message.selectedChoiceIds !== undefined || message.customInput !== undefined) {
+    const selectedText = resolveSelectedChoices(selectedIds, choices, message.selectedChoiceTexts)
+    if (selectedText || !selectedIds.length) {
+      if (!selectedIds.length) return supplement || message.content.trim()
+      return [selectedText, supplement ? `补充指令：${supplement}` : ''].filter(Boolean).join('；') || message.content.trim()
+    }
+  }
+
+  return expandLegacySelectedChoices(message.content.trim(), choices)
+}
+
+function expandLegacySelectedChoices(content: string, choices: Choice[]): string {
   const match = content.match(/^([A-Z]+)(，但是[\s\S]*)?$/)
   if (!match) return content
 
-  const choiceMap = new Map(choices.map((choice) => [choice.id.toUpperCase(), choice.text]))
-  const selectedTexts = [...match[1]].map((id) => choiceMap.get(id))
-  if (selectedTexts.some((text) => !text)) return content
+  const selectedText = resolveSelectedChoices([...match[1]], choices)
+  if (!selectedText) return content
 
-  return `${selectedTexts.join('；')}${match[2] ?? ''}`
+  const supplement = match[2]?.replace(/^，但是/, '').trim()
+  return [selectedText, supplement ? `补充指令：${supplement}` : ''].filter(Boolean).join('；')
+}
+
+function resolveSelectedChoices(selectedIds: string[], choices: Choice[], storedTexts: Record<string, string> = {}): string {
+  const choiceMap = new Map(choices.map((choice) => [choice.id.toUpperCase(), choice.text]))
+  const selectedTexts = selectedIds.map((id) => {
+    const normalizedId = id.toUpperCase()
+    const text = storedTexts[normalizedId] || choiceMap.get(normalizedId)
+    return text ? `${normalizedId}：${text}` : ''
+  })
+  return selectedTexts.every(Boolean) ? selectedTexts.join('；') : ''
 }

@@ -138,8 +138,7 @@ describe('chapter turn tracking', () => {
     }))
 
     expect(buildTurnInstructions(game, false)).toContain(CHAPTER_CONTINUE_INSTRUCTION)
-    expect(CHAPTER_CONTINUE_INSTRUCTION).toContain('章节结束的选项')
-    expect(CHAPTER_CONTINUE_INSTRUCTION).not.toContain('切换章节')
+    expect(CHAPTER_CONTINUE_INSTRUCTION).toBe('尽量不要生成结束章节的选项，保持故事在当前场景下继续推进；如果章节已接近尾声，可以输出一个“收尾并结束本章（结束章节）”的选项。')
     expect(buildTurnInstructions(game, false)).not.toContain(CHAPTER_ENDING_CHOICE_INSTRUCTION)
     game.messages.push({ id: 'u10', role: 'user', content: '继续', chapterTitle: '调查', createdAt: 10 })
     expect(buildTurnInstructions(game, false)).toContain(CHAPTER_ENDING_CHOICE_INSTRUCTION)

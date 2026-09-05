@@ -20,6 +20,8 @@ function portableRoot() {
 function registerPortableStorageHandlers(storage) {
   ipcMain.handle('portable-storage:read-value', (_event, key) => storage.readValue(key))
   ipcMain.handle('portable-storage:write-value', (_event, key, value) => storage.writeValue(key, value))
+  ipcMain.handle('portable-storage:read-data-file', (_event, filePath) => storage.readDataFile(filePath))
+  ipcMain.handle('portable-storage:write-data-file', (_event, filePath, value) => storage.writeDataFile(filePath, value))
   ipcMain.handle('portable-storage:save-portrait', (_event, payload) => storage.savePortrait(payload))
   ipcMain.handle('portable-storage:read-portrait', (_event, uri) => storage.readPortrait(uri))
   ipcMain.handle('portable-storage:delete-portrait', (_event, uri) => storage.deletePortrait(uri))

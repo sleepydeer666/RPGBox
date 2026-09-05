@@ -124,6 +124,7 @@ export default defineConfig(({ mode }) => {
       input: {
         app: resolve(process.cwd(), 'index.html'),
         builder: resolve(process.cwd(), 'builder.html'),
+        chromaKey: resolve(process.cwd(), 'chroma-key.html'),
       },
     },
   },

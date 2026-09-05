@@ -27,6 +27,7 @@ export interface ChatMessage {
   inputTokens?: number
   outputTokens?: number
   selectedChoiceIds?: string[]
+  selectedChoiceTexts?: Record<string, string>
   customInput?: string
   chapterTitle?: string
   /** Narrative mode in effect before this turn's first visible segment. */
@@ -197,6 +198,8 @@ export interface GameSession {
   nsfwScenePrompt: string
   worldSettingPrompt: string
   characters: CharacterProfile[]
+  /** Whether character status buttons are shown on the RPG stage. */
+  showStatusControls?: boolean
   messages: ChatMessage[]
   gameState: GameState
   narrative: NarrativeProgress

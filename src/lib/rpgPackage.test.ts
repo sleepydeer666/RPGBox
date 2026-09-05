@@ -53,15 +53,15 @@ describe('RPGBox XML manifest', () => {
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
-    const xml = await zip.file('rpg.xml')!.async('string')
-    const sections = parseRpgboxXml(xml)
-    expect(sections.settings).not.toHaveProperty('aiSettings')
-    expect(sections.settings).not.toHaveProperty('note')
-    expect(sections.settings).not.toHaveProperty('nsfwEnabled')
-    expect(sections.settings?.newStoryChoiceCount).toBe(4)
-    expect(sections.settings?.modeStoryStylePrompts).toEqual({ normal: '舒缓叙事', nsfw: '感官叙事' })
-    expect(xml).not.toContain('private-provider')
-    expect(xml).not.toContain('private-model')
+    const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
+    const settings = JSON.parse(await zip.file('settings.json')!.async('string'))
+    expect(manifest.version).toBe(2)
+    expect(settings).not.toHaveProperty('aiSettings')
+    expect(settings).not.toHaveProperty('note')
+    expect(settings).not.toHaveProperty('nsfwEnabled')
+    expect(settings.newStoryChoiceCount).toBe(4)
+    expect(settings.modeStoryStylePrompts).toEqual({ normal: '舒缓叙事', nsfw: '感官叙事' })
+    expect(await zip.file('chat/recent.json')!.async('string')).not.toContain('private-provider')
   })
 
   it('exports complete character settings and portraits from every narrative mode', async () => {
@@ -76,11 +76,25 @@ describe('RPGBox XML manifest', () => {
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, typeof write.data === 'string' ? { base64: true } : undefined)
-    const xml = await zip.file('rpg.xml')!.async('string')
-    const sections = parseRpgboxXml(xml)
-    expect(sections.characters?.[0].modeDescriptions?.nsfw).toBe('private-nsfw-setting')
-    expect(sections.characters?.[0].portraits.map((portrait) => portrait.id)).toEqual(['normal', 'nsfw'])
-    expect(sections.nsfw?.characterSettings).toBeUndefined()
+    const characters = JSON.parse(await zip.file('characters.json')!.async('string'))
+    expect(characters[0].modeDescriptions?.nsfw).toBe('private-nsfw-setting')
+    expect(characters[0].portraits.map((portrait: { id: string }) => portrait.id)).toEqual(['normal', 'nsfw'])
+    expect(await zip.file(characters[0].portraits[0].assetPath)!.async('uint8array')).toBeInstanceOf(Uint8Array)
+  })
+
+  it('reports portrait packaging progress during export', async () => {
+    const game = createBlankGame(1)
+    game.characters[0].portraits = [
+      { id: 'normal', expression: '平静', uri: 'file:///normal.png', groups: ['normal'] },
+      { id: 'smile', expression: '微笑', uri: 'file:///smile.png', groups: ['normal'] },
+    ]
+    const progress = vi.fn()
+
+    await exportRpgbox(game, { settings: false, characters: true, onPortraitProgress: progress })
+
+    expect(progress).toHaveBeenNthCalledWith(1, 0, 2)
+    expect(progress).toHaveBeenNthCalledWith(2, 1, 2)
+    expect(progress).toHaveBeenLastCalledWith(2, 2)
   })
 
   it('includes character NSFW settings with character exports', async () => {
@@ -91,8 +105,8 @@ describe('RPGBox XML manifest', () => {
 
     const write = filesystemMocks.writeFile.mock.calls.at(-1)?.[0]
     const zip = await JSZip.loadAsync(write.data, { base64: true })
-    const sections = parseRpgboxXml(await zip.file('rpg.xml')!.async('string'))
-    expect(sections.characters?.[0].modeDescriptions?.nsfw).toBe('shared-nsfw-setting')
+    const characters = JSON.parse(await zip.file('characters.json')!.async('string'))
+    expect(characters[0].modeDescriptions?.nsfw).toBe('shared-nsfw-setting')
   })
 
   it('imports a package selected through the system file picker', async () => {

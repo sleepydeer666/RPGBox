@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, Hourglass, Lock, MapPin, Menu, Plus, RefreshCw, RotateCcw, Send, Server, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { AlertTriangle, BookOpen, Brain, Bug, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDown, ChevronsUp, CircleStop, ClipboardList, Clock3, Flag, History, Hourglass, Lock, MapPin, Menu, Plus, RefreshCw, RotateCcw, Send, Server, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import GameDrawer, { type GameDrawerProps } from './components/GameDrawer'
 import GameSettingsDialog from './components/GameSettingsDialog'
@@ -21,7 +21,7 @@ import { completedTurnPlaybackIndex, hasCompleteVisibleContent, isChoicePageVisi
 import { portraitSource } from './lib/portraits'
 import { deletePortraitFile } from './lib/portraits'
 import { cloneGameSession, exportRpgbox, importRpgbox, type RpgboxImportSource, type RpgExportOptions } from './lib/rpgPackage'
-import { buildFormatRepairApiMessages, buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnDynamicInstructions, buildTurnNarrativeContext, buildTurnOutputContract, buildTurnRequestDebugContent, FORMAT_REPAIR_INSTRUCTION, normalizeAssistantMessageForContext, takeRecentConversationTurns, toApiMessages, type LlmSpecialInstructions } from './lib/prompt'
+import { buildFormatRepairApiMessages, buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnDynamicInstructions, buildTurnNarrativeContext, buildTurnOutputContract, buildTurnRequestDebugContent, FORMAT_REPAIR_INSTRUCTION, normalizeAssistantMessageForContext, PORTRAIT_TAG_REPAIR_INSTRUCTION, takeRecentConversationTurns, toApiMessages, type LlmSpecialInstructions } from './lib/prompt'
 import { inspectLatestResponseCompletion, mergeContinuationResponseResult, responseContinuationInstruction } from './lib/responseCompletion'
 import { appendRollbackSnapshot, changedStatusCharacterIds, createRollbackSnapshot, latestTurnPreviousStatuses, restoreLastRollback, rollbackInputDraft } from './lib/rollback'
 import { buildTurnStateInstruction, choiceActionText, resolveTurnContentMode } from './lib/rpgState'
@@ -33,6 +33,7 @@ import { streamCompletion } from './services/openai'
 import type { CompletionUsage } from './services/openai'
 import { createInitialProviderState, loadState, saveState } from './storage'
 import { readLocalFlag, writeLocalFlag } from './platform/stateStore'
+import { listStoredChapters, readStoredChapter, type StoredChapterSummary } from './platform/rpgFileStore'
 import type { ChapterMemory, CharacterProfile, ChatMessage, Choice, DebugPromptSegment, GameSession, MemoryState, MemorySummaryDebugEntry, PortraitGroup, ProviderProfile, StorySegment } from './types'
 
 function newId(prefix: string) {
@@ -75,6 +76,7 @@ function App() {
   const [games, setGames] = useState<GameSession[]>([])
   const [activeGameId, setActiveGameId] = useState('')
   const [bundledRpgImportKeys, setBundledRpgImportKeys] = useState<string[]>([])
+  const [lightMode, setLightMode] = useState(false)
   const [bundledRpgPresets, setBundledRpgPresets] = useState<BundledRpgPreset[]>([])
   const [segmentPositions, setSegmentPositions] = useState<Record<string, number>>({})
   const [manualDisplayContentModes, setManualDisplayContentModes] = useState<Record<string, PortraitGroup | undefined>>({})
@@ -187,7 +189,7 @@ function App() {
   const hasStoryRecord = activeGame.messages.some((message) => message.role === 'user'
     || (message.role === 'assistant' && message.content.trim() && message.content.trim() !== EMPTY_RPG_PLACEHOLDER))
   const emptyRpg = !hasStoryRecord && !busy
-  const previousStageTurns = useMemo(() => activeGame.messages.flatMap((message): StageTurn[] => {
+  const previousStageTurns = useMemo(() => activeGame.messages.slice(-100).flatMap((message): StageTurn[] => {
     if (message.role !== 'assistant' || message.id === latestAssistant?.id) return []
     const parsed = parseAssistantResponse(message.rawContent ?? message.content, {
       characters: activeGame.characters,
@@ -204,8 +206,12 @@ function App() {
   const patchedDisplayGameState = applyRpgStatePatch(activeGame.gameState, currentSegment?.statePatch ?? currentStageParse.gameData?.statePatch)
   const playbackContentMode = resolvePlaybackContentMode(choicesVisible, currentSegment, latestInitialContentMode, activeGame.gameState.contentMode, manualDisplayContentModes[activeGame.id])
   const displayGameState = { ...patchedDisplayGameState, contentMode: playbackContentMode }
-  const displayChapterTitle = activeGame.narrative.chapter.title.trim()
+  const streamingChapterTitle = busy && activeGame.narrative.chapterPhase === 'transition'
+    ? streamingParsed.newChapterTitle?.trim() ?? ''
+    : ''
+  const displayChapterTitle = streamingChapterTitle || activeGame.narrative.chapter.title.trim()
   const displayChapterTurnCount = activeGame.narrative.chapterPhase === 'active' ? chapterTurnCount : 0
+  const showStatusControls = activeGame.showStatusControls ?? true
   const currentPresentCharacterIds = currentSegment?.presentCharacterIds
   const persistentDialogueActors = collectRecentActors([
     ...previousStageTurns,
@@ -231,11 +237,6 @@ function App() {
     ? changedStatusCharacterIds(previousStatuses, latestParsed.characterStatusUpdates)
     : new Set<string>()
   const visibleStatusActors = choicesVisible ? choiceActors : dialogueStatusActors
-  const historyLines = useMemo(
-    () => buildHistoryLines(activeGame.messages, busy ? latestAssistant?.id : undefined, activeGame.characters),
-    [activeGame.characters, activeGame.messages, busy, latestAssistant?.id],
-  )
-
   useEffect(() => {
     void loadBundledDefaultPrompt().then(setBundledDefaultPrompt)
   }, [])
@@ -300,6 +301,7 @@ function App() {
       if (saved.activeProviderId) setActiveProviderId(saved.activeProviderId)
       if (saved.globalJailbreakPrompt) setGlobalJailbreakPrompt(saved.globalJailbreakPrompt)
       setBundledRpgImportKeys(saved.bundledRpgImportKeys ?? [])
+      setLightMode(saved.lightMode ?? false)
       const savedGames = saved.games ?? []
       setGames(savedGames)
       setActiveGameId(saved.activeGameId ?? saved.games?.[0]?.id ?? '')
@@ -331,10 +333,18 @@ function App() {
   }, [autoMemoryFeedback])
 
   useEffect(() => {
-    if (!hydrated) return
-    const timer = window.setTimeout(() => void saveState({ providers, activeProviderId, globalJailbreakPrompt, games, activeGameId, bundledRpgImportKeys }), 250)
+    if (!hydrated || busy) return
+    const timer = window.setTimeout(() => void saveState({ providers, activeProviderId, globalJailbreakPrompt, games, activeGameId, bundledRpgImportKeys, lightMode }).catch((saveError) => setError(`保存失败：${toErrorMessage(saveError)}`)), 250)
     return () => window.clearTimeout(timer)
-  }, [activeGameId, activeProviderId, bundledRpgImportKeys, games, globalJailbreakPrompt, hydrated, providers])
+  }, [activeGameId, activeProviderId, bundledRpgImportKeys, busy, games, globalJailbreakPrompt, hydrated, lightMode, providers])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = lightMode ? 'light' : 'dark'
+  }, [lightMode])
+
+  function toggleLightMode() {
+    setLightMode((current) => !current)
+  }
 
   useEffect(() => {
     setViewedStatusCharacterId(null)
@@ -435,7 +445,7 @@ function App() {
     const game = { ...imported.game, updatedAt: Date.now() }
     const nextGames = [...games, game]
     const nextImportedKeys = Array.from(new Set([...bundledRpgImportKeys, imported.key]))
-    await saveState({ providers, activeProviderId, globalJailbreakPrompt, games: nextGames, activeGameId: game.id, bundledRpgImportKeys: nextImportedKeys })
+    await saveState({ providers, activeProviderId, globalJailbreakPrompt, games: nextGames, activeGameId: game.id, bundledRpgImportKeys: nextImportedKeys, lightMode })
     setGames(nextGames)
     setActiveGameId(game.id)
     setBundledRpgImportKeys(nextImportedKeys)
@@ -474,10 +484,10 @@ function App() {
     setGameDrawerOpen(false)
   }
 
-  async function exportGame(gameId: string, options: RpgExportOptions) {
+  async function exportGame(gameId: string, options: RpgExportOptions, onPortraitProgress?: (completed: number, total: number) => void) {
     const game = games.find((item) => item.id === gameId)
     if (!game) throw new Error('找不到要导出的 RPG')
-    return exportRpgbox(game, options)
+    return exportRpgbox(game, { ...options, onPortraitProgress })
   }
 
   function updateRpgMetadata(gameId: string, title: string) {
@@ -849,7 +859,7 @@ function App() {
     const continuationPromptInitialMode = parseAssistantResponse(originalRaw, parseContext).narrativeModeSwitchIndexes.length
       ? continuationContentMode
       : continuationInitialContentMode
-    const apiHistory = gameSnapshot.messages.map((message) => message.role === 'assistant'
+    const apiHistory = takeRecentConversationTurns(gameSnapshot.messages, gameSnapshot.aiSettings.contextTurns).map((message) => message.role === 'assistant'
       ? {
           ...message,
           content: normalizeAssistantMessageForContext(
@@ -905,7 +915,7 @@ function App() {
     const compatiblePromptFormat = gameSnapshot.aiSettings.useCompatiblePromptFormat ?? true
     const continuationApiMessages = buildRpgTurnApiMessages({
       systemPrompt: buildSystemPrompt(continuationGameSnapshot, requestGlobalJailbreakPrompt, continuationPromptInitialMode),
-      conversation: [...takeRecentConversationTurns(apiHistory, gameSnapshot.aiSettings.contextTurns), continuationInstruction],
+      conversation: [...apiHistory, continuationInstruction],
       dynamicInstructions: continuationDynamicInstructions,
       outputContract: continuationOutputContract,
       compatible: compatiblePromptFormat,
@@ -1024,8 +1034,12 @@ function App() {
     }
   }
 
-  async function repairLatestResponseFormat() {
+  async function repairLatestResponse(repairKind: 'format' | 'portrait-tags') {
     if (busy || summarizingMemory || !activeProvider) return
+    const repairInstruction = repairKind === 'portrait-tags'
+      ? PORTRAIT_TAG_REPAIR_INSTRUCTION
+      : FORMAT_REPAIR_INSTRUCTION
+    const repairLabel = repairKind === 'portrait-tags' ? '立绘标签修正' : '格式修正'
     const originalGame = activeGame
     const rollbackSnapshot = originalGame.rollbackLog?.at(-1)
     const originalAssistant = originalGame.messages.at(-1)
@@ -1039,7 +1053,7 @@ function App() {
       || originalAssistant?.role !== 'assistant'
       || !originalUser.requestSegments?.length
       || !rawResponse.trim()) {
-      setError('当前轮缺少完整的请求记录或回退记录，无法尝试修正格式。')
+      setError(`当前轮缺少完整的请求记录或回退记录，无法尝试${repairLabel}。`)
       return
     }
     const restoredGame = restoreLastRollback(originalGame)
@@ -1053,19 +1067,20 @@ function App() {
       originalUser.requestSegments,
       originalUser.content,
       rawResponse,
+      repairInstruction,
     )
     const repairRequestSegments: DebugPromptSegment[] = repairApiMessages.map((message, index) => ({
       title: index === repairApiMessages.length - 2
         ? '待修正的 LLM 原文'
         : index === repairApiMessages.length - 1
-          ? '本轮格式修正指令'
+          ? `本轮${repairLabel}指令`
           : message.role === 'system' ? '原轮规则' : '原轮兼容格式规则',
       role: message.role,
       content: message.content,
     }))
     const repairedUser: ChatMessage = {
       ...originalUser,
-      requestContent: FORMAT_REPAIR_INSTRUCTION,
+      requestContent: repairInstruction,
       requestSegments: repairRequestSegments,
       createdAt: Date.now(),
     }
@@ -1163,7 +1178,7 @@ function App() {
       }))
     } catch (repairError) {
       if (!controller.signal.aborted) {
-        setError(`格式修正失败：${toErrorMessage(repairError)}`)
+        setError(`${repairLabel}失败：${toErrorMessage(repairError)}`)
         updateGame(gameId, () => originalGame)
         setSegmentPositions((current) => ({ ...current, [gameId]: previousSegmentPosition }))
       }
@@ -1221,6 +1236,11 @@ function App() {
       },
     } : turnGameSnapshot
     const submittedSelectedChoices = forcedInput ? [] : [...selectedChoices]
+    const submittedSelectedChoiceTexts = forcedInput ? {} : Object.fromEntries(
+      latestParsed.choices
+        .filter((choice) => submittedSelectedChoices.includes(choice.id))
+        .map((choice) => [choice.id.toUpperCase(), choice.text]),
+    )
     const submittedCustomInput = forcedInput ? '' : supplement
     const submittedSpecialInstructions = llmSpecialInstructions
     const submittedRpgStateLocked = rpgStateLocked
@@ -1240,6 +1260,7 @@ function App() {
       role: 'user',
       content: input,
       selectedChoiceIds: submittedSelectedChoices,
+      selectedChoiceTexts: submittedSelectedChoiceTexts,
       customInput: submittedCustomInput,
       rpgStateId: resolvedContentMode,
       createdAt: Date.now(),
@@ -1288,7 +1309,7 @@ function App() {
     setLlmSpecialInstructionsOpen(false)
     setRpgStateLocked(false)
     const parseContext = { characters: gameSnapshot.characters, narrativeModes: gameSnapshot.narrativeModes, treatMalformedLinesAsNarration: gameSnapshot.aiSettings.treatMalformedLinesAsNarration }
-    const normalizedHistory = gameSnapshot.messages.map((message) => message.role === 'assistant'
+    const normalizedHistory = takeRecentConversationTurns(gameSnapshot.messages, gameSnapshot.aiSettings.contextTurns).map((message) => message.role === 'assistant'
       ? {
           ...message,
           content: normalizeAssistantMessageForContext(
@@ -1307,7 +1328,7 @@ function App() {
     const compatiblePromptFormat = gameSnapshot.aiSettings.useCompatiblePromptFormat ?? true
     const turnApiMessages = buildRpgTurnApiMessages({
       systemPrompt: buildSystemPrompt(turnGameSnapshot, requestGlobalJailbreakPrompt, initialContentMode),
-      conversation: takeRecentConversationTurns(apiRequestMessages, gameSnapshot.aiSettings.contextTurns),
+      conversation: apiRequestMessages,
       dynamicInstructions,
       outputContract,
       compatible: compatiblePromptFormat,
@@ -1571,6 +1592,8 @@ function App() {
       onImportBundledRpg: importPreset,
       onOpenSettings: () => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) },
       onStartOnboarding: () => {},
+      lightMode,
+      onToggleLightMode: toggleLightMode,
     }
     return <><EmptyLibraryScreen loading={!hydrated} onOpenLibrary={() => setGameDrawerOpen(true)} drawerProps={drawerProps} />{globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}</>
   }
@@ -1617,6 +1640,9 @@ function App() {
                 </label>
               </div>}
             </div>}
+            <button type="button" className={`status-controls-toggle ${showStatusControls ? 'enabled' : 'disabled'}`} onClick={(event) => { event.stopPropagation(); updateGame(activeGame.id, (game) => ({ ...game, showStatusControls: !(game.showStatusControls ?? true), updatedAt: Date.now() })) }} title={showStatusControls ? '隐藏角色状态栏按钮' : '显示角色状态栏按钮'} aria-label={showStatusControls ? '隐藏角色状态栏按钮' : '显示角色状态栏按钮'}>
+              <ClipboardList size={14} /><span className="status-controls-toggle-mark" aria-hidden="true">{showStatusControls ? '✓' : '×'}</span>
+            </button>
           </div>
           {sceneAnnouncement && <div className="scene-announcement-zone" aria-live="polite" key={sceneAnnouncement.key}>
             <div className="scene-announcement">
@@ -1629,20 +1655,20 @@ function App() {
             </div>
           </div>}
           {(!hasUsableProvider || error || protocolAlertKey) && <div className="stage-alerts" aria-live="polite">
-            {!hasUsableProvider && <div className="stage-alert error"><span>尚未设置LLM，请在左上角菜单的全局设置中设置可用的大语言模型AI接口</span></div>}
+            {!hasUsableProvider && <div className="stage-alert error"><span>尚未设置LLM，请在左上角菜单的AI配置中设置可用的大语言模型AI接口</span></div>}
             {error && <div className="stage-alert error"><span>{error}</span><button onClick={(event) => { event.stopPropagation(); setError('') }} title="关闭错误提示"><X size={15} /></button></div>}
             {protocolAlertKey && <div key={protocolAlertKey} className="stage-alert protocol">LLM输出存在格式异常，可检查 <span className="alert-command">Debug-&gt;输出</span> 查看细节。建议继续下一轮对话前使用 <span className="alert-command">指令-&gt;尝试修正格式</span> 进行修复，或撤回重新输出。如果模型一直无法正确遵守格式，建议打开 <span className="alert-command">设置-&gt;错误格式以旁白处理</span> 开关。如不想再收到此提醒，可关闭 <span className="alert-command">设置-&gt;LLM输出不符合格式时提醒</span></div>}
           </div>}
           {choicesVisible ? (
-            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} narrativeModes={activeNarrativeModes} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} changedStatusCharacterIds={changedStatusIds} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} showContinuation={showChoiceContinuation} onContinue={() => void continueTruncatedResponse()} />
+            <ChoiceScene choices={latestParsed.choices} selectedChoices={selectedChoices} actors={choiceActors} characters={activeGame.characters} narrativeModes={activeNarrativeModes} mode={displayGameState.contentMode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} changedStatusCharacterIds={changedStatusIds} onToggle={toggleChoice} onCloseChapter={() => void sendTurn(CLOSE_CHAPTER_INSTRUCTION)} showContinuation={showChoiceContinuation} onContinue={() => void continueTruncatedResponse()} />
           ) : busy && currentSegment?.type === 'dialogue' ? (
-            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} streaming />
+            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} lightMode={lightMode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} streaming />
           ) : busy ? (
-            <NarrationScene text={currentSegment?.text || '正在生成'} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} streaming />
+            <NarrationScene text={currentSegment?.text || '正在生成'} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} streaming />
           ) : currentSegment?.type === 'dialogue' ? (
-            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} />
+            <DialogueScene segment={currentSegment} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} lightMode={lightMode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} />
           ) : (
-            <NarrationScene text={currentSegment?.text || '...'} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} />
+            <NarrationScene text={currentSegment?.text || '...'} characters={activeGame.characters} actors={dialogueStatusActors} mode={displayGameState.contentMode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={setViewedStatusCharacterId} statusRulesEnabled={statusRulesEnabled} characterExperiences={memoryForDisplay.characterExperiences ?? {}} characterExperienceEnabled={memoryForDisplay.characterExperienceEnabled ?? true} />
           )}
         </div>
 
@@ -1670,12 +1696,12 @@ function App() {
         {interactionNotice && <div className="interaction-notice" role="status" aria-live="polite">{interactionNotice}</div>}
       </main>
 
-      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} onStartOnboarding={() => { setGameDrawerOpen(false); setOnboardingOpen(true) }} />
+      <GameDrawer open={gameDrawerOpen} games={games} activeGameId={activeGame.id} onClose={() => setGameDrawerOpen(false)} onSelect={selectGame} onReorder={reorderGames} onCreate={createGame} onUpdateMetadata={updateRpgMetadata} onDelete={deleteGame} onClone={cloneGame} onExport={exportGame} bundledRpgPresets={bundledRpgPresets} bundledRpgImportKeys={bundledRpgImportKeys} onImportBundledRpg={importPreset} onOpenSettings={() => { setGameDrawerOpen(false); setGlobalSettingsOpen(true) }} onStartOnboarding={() => { setGameDrawerOpen(false); setOnboardingOpen(true) }} lightMode={lightMode} onToggleLightMode={toggleLightMode} />
       {gameSettingsOpen && <GameSettingsDialog game={activeGame} games={games} providers={providers} fullSystemPrompt={buildSystemPrompt(activeGame, effectiveGlobalJailbreakPrompt)} onClose={() => setGameSettingsOpen(false)} onChange={(nextGame) => updateGame(activeGame.id, () => nextGame)} />}
       {globalSettingsOpen && <GlobalSettingsDialog providers={providers} activeProviderId={activeProviderId} globalJailbreakPrompt={globalJailbreakPrompt} onClose={() => setGlobalSettingsOpen(false)} onChangeProviders={setProviders} onChangeActive={setActiveProviderId} onChangeGlobalJailbreakPrompt={setGlobalJailbreakPrompt} />}
-      {historyOpen && <HistoryDialog lines={historyLines} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryDialog gameId={activeGame.id} messages={activeGame.messages} excludedMessageId={busy ? latestAssistant?.id : undefined} characters={activeGame.characters} onResetStory={resetStory} onClose={() => setHistoryOpen(false)} />}
       {debugOpen && <RawResponseDialog requestSegments={debugExchange.requestSegments} content={debugExchange.rawResponse} repairContent={debugExchange.repairContent} memorySummaryEntries={debugExchange.memorySummaryEntries} inputTokens={debugExchange.inputTokens} outputTokens={debugExchange.outputTokens} characters={activeGame.characters} contentMode={latestFinalContentMode} initialContentMode={latestInitialContentMode} narrativeModes={activeGame.narrativeModes} treatMalformedLinesAsNarration={activeGame.aiSettings.treatMalformedLinesAsNarration} onClose={() => setDebugOpen(false)} />}
-      {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponseFormat()} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
+      {llmSpecialInstructionsOpen && <LlmSpecialInstructionsDialog value={llmSpecialInstructions} repairDisabled={busy || Boolean(summarizingMemory) || !activeProvider || !canRepairLatestResponse} onRepair={() => void repairLatestResponse('format')} onRepairPortraitTags={() => void repairLatestResponse('portrait-tags')} onChange={setLlmSpecialInstructions} onClose={() => setLlmSpecialInstructionsOpen(false)} />}
       {memoryOpen && <MemoryDialog game={activeGame} summarizing={summarizingMemory} actionsDisabled={busy || !activeProvider} onSummarize={summarizeMemoryNow} onSummarizeExperiences={summarizeCharacterExperiencesNow} onChange={(memory) => updateGame(activeGame.id, (game) => ({ ...game, memory, updatedAt: Date.now() }))} onClose={() => setMemoryOpen(false)} />}
       {rollbackConfirmOpen && <RollbackConfirmDialog onCancel={() => setRollbackConfirmOpen(false)} onConfirm={() => { setRollbackConfirmOpen(false); rollbackTurn() }} />}
       {onboardingPromptOpen && <OnboardingPrompt onAnswer={(accepted) => { setOnboardingPromptSeen(true); setOnboardingPromptOpen(false); void writeLocalFlag(ONBOARDING_PROMPT_SEEN_KEY); if (accepted) setOnboardingOpen(true) }} />}
@@ -1911,6 +1937,7 @@ function CharacterExperienceSummaryDialog({ chapters, characters, summarizing, o
 }
 
 interface StatusViewProps {
+  showStatusControls: boolean
   viewedStatusCharacterId: string | null
   onViewStatus: (characterId: string | null) => void
   statusRulesEnabled: boolean
@@ -1918,7 +1945,7 @@ interface StatusViewProps {
   characterExperienceEnabled: boolean
 }
 
-function DialogueScene({ segment, characters, actors, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, streaming = false }: { segment: StorySegment; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean } & StatusViewProps) {
+function DialogueScene({ segment, characters, actors, mode, lightMode, showStatusControls, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, streaming = false }: { segment: StorySegment; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; lightMode: boolean; streaming?: boolean } & StatusViewProps) {
   const character = characters.find((item) => item.id === segment.characterId)
     ?? characters.find((item) => item.name === segment.characterName)
   const { portrait, displayExpression } = resolveCharacterExpression(character, segment.expression, mode)
@@ -1931,13 +1958,14 @@ function DialogueScene({ segment, characters, actors, mode, viewedStatusCharacte
       actors={actors.length ? actors : portrait && character ? [{ character, expression: segment.expression ?? '', position: 0, enteredAt: 0 }] : []}
       activeCharacterId={portrait ? character?.id : undefined}
       mode={mode}
+      showStatusControls={showStatusControls}
       viewedStatusCharacterId={viewedStatusCharacterId}
       onViewStatus={onViewStatus}
       statusRulesEnabled={statusRulesEnabled}
       characterExperiences={characterExperiences}
       characterExperienceEnabled={characterExperienceEnabled}
     >
-      <div className={`dialogue-box ${streaming ? 'streaming' : ''}`} style={{ borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 14%, rgba(18, 19, 17, 0.96))` }}>
+      <div className={`dialogue-box ${streaming ? 'streaming' : ''}`} style={{ borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 14%, ${lightMode ? 'rgba(255, 255, 255, 0.96)' : 'rgba(18, 19, 17, 0.96)'})` }}>
         <div className="speaker-line"><strong style={{ color }}>{speakerName}</strong><span>{displayExpression}</span></div>
         <p><CharacterText text={segment.text} characters={characters} /></p>
       </div>
@@ -1945,17 +1973,17 @@ function DialogueScene({ segment, characters, actors, mode, viewedStatusCharacte
   )
 }
 
-function NarrationScene({ text, characters, actors, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, streaming = false }: { text: string; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean } & StatusViewProps) {
+function NarrationScene({ text, characters, actors, mode, showStatusControls, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, streaming = false }: { text: string; characters: CharacterProfile[]; actors: StageActor[]; mode: PortraitGroup; streaming?: boolean } & StatusViewProps) {
   return (
-    <StoryScene actors={actors} mode={mode} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus} statusRulesEnabled={statusRulesEnabled} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled}>
+    <StoryScene actors={actors} mode={mode} showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus} statusRulesEnabled={statusRulesEnabled} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled}>
       <div className={`narration-panel ${streaming ? 'streaming' : ''}`}><p><CharacterText text={text} characters={characters} narration /></p></div>
     </StoryScene>
   )
 }
 
-function ChoiceScene({ choices, selectedChoices, actors, characters, narrativeModes, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, changedStatusCharacterIds, onToggle, onCloseChapter, showContinuation, onContinue }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; narrativeModes: GameSession['narrativeModes']; mode: PortraitGroup; changedStatusCharacterIds: Set<string>; onToggle: (choice: Choice) => void; onCloseChapter: () => void; showContinuation: boolean; onContinue: () => void } & StatusViewProps) {
+function ChoiceScene({ choices, selectedChoices, actors, characters, narrativeModes, mode, showStatusControls, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, changedStatusCharacterIds, onToggle, onCloseChapter, showContinuation, onContinue }: { choices: Choice[]; selectedChoices: string[]; actors: StageActor[]; characters: CharacterProfile[]; narrativeModes: GameSession['narrativeModes']; mode: PortraitGroup; changedStatusCharacterIds: Set<string>; onToggle: (choice: Choice) => void; onCloseChapter: () => void; showContinuation: boolean; onContinue: () => void } & StatusViewProps) {
   return (
-    <StoryScene actors={actors} mode={mode} className="choice-scene" viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus} statusRulesEnabled={statusRulesEnabled} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled} changedStatusCharacterIds={changedStatusCharacterIds}>
+    <StoryScene actors={actors} mode={mode} className="choice-scene" showStatusControls={showStatusControls} viewedStatusCharacterId={viewedStatusCharacterId} onViewStatus={onViewStatus} statusRulesEnabled={statusRulesEnabled} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled} changedStatusCharacterIds={changedStatusCharacterIds}>
       <section className="choice-overlay" aria-label="剧情选项" onClick={(event) => event.stopPropagation()}>
         <div className="selection-heading">
           {showContinuation && <button type="button" className="continue-response-button choice-continuation-button" onClick={onContinue}><RefreshCw size={14} />从截断处补全</button>}
@@ -1974,7 +2002,7 @@ function ChoiceScene({ choices, selectedChoices, actors, characters, narrativeMo
   )
 }
 
-function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, changedStatusCharacterIds = new Set<string>(), className = '', children }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; changedStatusCharacterIds?: Set<string>; className?: string; children: React.ReactNode } & StatusViewProps) {
+function StoryScene({ actors, activeCharacterId, mode, showStatusControls, viewedStatusCharacterId, onViewStatus, statusRulesEnabled, characterExperiences, characterExperienceEnabled, changedStatusCharacterIds = new Set<string>(), className = '', children }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; changedStatusCharacterIds?: Set<string>; className?: string; children: React.ReactNode } & StatusViewProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const lastTouchYRef = useRef(0)
   const dragDistanceRef = useRef(0)
@@ -2014,7 +2042,7 @@ function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, 
           suppressClickRef.current = false
         }}
       >
-        <StagePortraits actors={actors} activeCharacterId={activeCharacterId} mode={mode} onViewStatus={onViewStatus} changedStatusCharacterIds={changedStatusCharacterIds} />
+        <StagePortraits actors={actors} activeCharacterId={activeCharacterId} mode={mode} onViewStatus={onViewStatus} changedStatusCharacterIds={changedStatusCharacterIds} showStatusControls={showStatusControls} />
         {viewedStatusCharacterId && <CharacterStatusOverlay character={actors.find((actor) => actor.character.id === viewedStatusCharacterId)?.character} characterExperiences={characterExperiences} characterExperienceEnabled={characterExperienceEnabled} statusRulesEnabled={statusRulesEnabled} onClose={() => onViewStatus(null)} />}
       </div>
       <div className="content-zone" data-onboarding-target="content" ref={contentRef}>{children}</div>
@@ -2022,7 +2050,7 @@ function StoryScene({ actors, activeCharacterId, mode, viewedStatusCharacterId, 
   )
 }
 
-function StagePortraits({ actors, activeCharacterId, mode, onViewStatus, changedStatusCharacterIds }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; onViewStatus: (characterId: string) => void; changedStatusCharacterIds: Set<string> }) {
+function StagePortraits({ actors, activeCharacterId, mode, onViewStatus, changedStatusCharacterIds, showStatusControls }: { actors: StageActor[]; activeCharacterId?: string; mode: PortraitGroup; onViewStatus: (characterId: string) => void; changedStatusCharacterIds: Set<string>; showStatusControls: boolean }) {
   // Keep the physical left/right slots stable; recency only controls stacking order.
   const visibleActors = actors.slice().sort((left, right) => left.position - right.position).flatMap((actor) => {
     const resolved = resolveCharacterExpression(actor.character, actor.expression, mode)
@@ -2041,7 +2069,7 @@ function StagePortraits({ actors, activeCharacterId, mode, onViewStatus, changed
           <img src={portraitSource(portrait.uri)} alt="" />
         </div>
       })}
-      {visibleActors.map(({ character }, index) => (
+      {showStatusControls && visibleActors.map(({ character }, index) => (
         <div className={`character-status-control slot-${index + 1}`} style={{ zIndex: 100 + (zIndexById.get(character.id) ?? 1) }} key={`status-${character.id}`}>
           <button type="button" className={`character-status-button ${changedStatusCharacterIds.has(character.id) ? 'status-changed' : ''}`} onClick={(event) => { event.stopPropagation(); onViewStatus(character.id) }} title={`查看${character.name}的状态和经历`} aria-label={`查看${character.name}的状态和经历`}><ClipboardList size={18} /></button>
         </div>
@@ -2072,12 +2100,51 @@ function CharacterText({ text, characters, narration = false }: { text: string; 
     : token.text)}</>
 }
 
-function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: ReturnType<typeof buildHistoryLines>; characters: CharacterProfile[]; onResetStory: () => void; onClose: () => void }) {
+function HistoryDialog({ gameId, messages, excludedMessageId, characters, onResetStory, onClose }: { gameId: string; messages: ChatMessage[]; excludedMessageId?: string; characters: CharacterProfile[]; onResetStory: () => void; onClose: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const localPages = useMemo(() => chapterMessagePages(messages), [messages])
+  const [storedChapters, setStoredChapters] = useState<StoredChapterSummary[]>([])
+  const [pageIndex, setPageIndex] = useState(Math.max(0, localPages.length - 1))
+  const [pageMessages, setPageMessages] = useState(localPages.at(-1)?.messages ?? [])
+  const pages = useMemo(() => storedChapters.length
+    ? storedChapters
+    : localPages.map((localPage, index) => ({ id: `local-${index}`, title: localPage.title, turnCount: 0 })), [localPages, storedChapters])
+  const page = pages[Math.min(pageIndex, Math.max(0, pages.length - 1))]
+  const lines = useMemo(() => buildHistoryLines(pageMessages, excludedMessageId, characters), [characters, excludedMessageId, pageMessages])
+
+  useEffect(() => {
+    let cancelled = false
+    void listStoredChapters(gameId).then((chapters) => {
+      if (cancelled || !chapters.length) return
+      setStoredChapters(chapters)
+      setPageIndex(chapters.length - 1)
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [gameId])
+
+  useEffect(() => {
+    let cancelled = false
+    const isLatest = pageIndex === pages.length - 1
+    if (isLatest) {
+      setPageMessages(localPages.at(-1)?.messages ?? [])
+      return () => { cancelled = true }
+    }
+    if (storedChapters.length && page) {
+      setPageMessages([])
+      void readStoredChapter(gameId, page.id).then((storedMessages) => {
+        if (!cancelled) setPageMessages(storedMessages)
+      }).catch(() => {
+        if (!cancelled) setPageMessages(localPages[pageIndex]?.messages ?? [])
+      })
+    } else {
+      setPageMessages(localPages[pageIndex]?.messages ?? [])
+    }
+    return () => { cancelled = true }
+  }, [gameId, localPages, page, pageIndex, pages.length, storedChapters.length])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [])
+  }, [pageIndex])
 
   function jumpToEdge(edge: 'top' | 'bottom') {
     const container = scrollRef.current
@@ -2107,6 +2174,11 @@ function HistoryDialog({ lines, characters, onResetStory, onClose }: { lines: Re
           <div><span className="eyebrow">STORY LOG</span><div className="history-title-line"><h2>历史记录</h2><button className="danger-button history-reset-button" onClick={() => { if (window.confirm('清空本RPG的全部对话、历史记忆和场景状态，并使用当前设置重新开始？')) onResetStory() }}><Trash2 size={14} />清空剧情并重新开始</button></div></div>
           <button className="icon-button" onClick={onClose} title="关闭"><X size={20} /></button>
         </div>
+        <nav className="history-chapter-pagination" aria-label="按章节翻阅历史记录">
+          <button type="button" onClick={() => setPageIndex((index) => Math.max(0, index - 1))} disabled={pageIndex <= 0} title="较早章节" aria-label="较早章节"><ChevronLeft size={19} /></button>
+          <span><strong>{page?.title ?? '尚无记录'}</strong><small>{pages.length ? `${pageIndex + 1} / ${pages.length}` : '0 / 0'}</small></span>
+          <button type="button" onClick={() => setPageIndex((index) => Math.min(pages.length - 1, index + 1))} disabled={pageIndex >= pages.length - 1} title="较新章节" aria-label="较新章节"><ChevronRight size={19} /></button>
+        </nav>
         <div className="history-scroll" ref={scrollRef}>
           {lines.length ? lines.map((line) => {
             const character = line.type === 'dialogue'
@@ -2192,10 +2264,11 @@ function RawResponseDialog({ requestSegments, content, repairContent, memorySumm
   )
 }
 
-function LlmSpecialInstructionsDialog({ value, repairDisabled, onRepair, onChange, onClose }: {
+function LlmSpecialInstructionsDialog({ value, repairDisabled, onRepair, onRepairPortraitTags, onChange, onClose }: {
   value: LlmSpecialInstructions
   repairDisabled: boolean
   onRepair: () => void
+  onRepairPortraitTags: () => void
   onChange: (value: LlmSpecialInstructions) => void
   onClose: () => void
 }) {
@@ -2212,6 +2285,7 @@ function LlmSpecialInstructionsDialog({ value, repairDisabled, onRepair, onChang
           <div className="llm-special-instructions-section">
             <p>以下功能用于对当前轮对话进行处理，点击即生效</p>
             <button type="button" className="secondary-button llm-format-repair-button" onClick={onRepair} disabled={repairDisabled}><RefreshCw size={16} />尝试修正格式</button>
+            <button type="button" className="secondary-button llm-format-repair-button" onClick={onRepairPortraitTags} disabled={repairDisabled}><RefreshCw size={16} />尝试修正立绘标签</button>
           </div>
           <div className="llm-special-instructions-section">
             <p>以下功能用于对LLM格式进行控制，将在下一轮对话中生效</p>
@@ -2225,6 +2299,20 @@ function LlmSpecialInstructionsDialog({ value, repairDisabled, onRepair, onChang
       </section>
     </div>
   )
+}
+
+function chapterMessagePages(messages: ChatMessage[]): Array<{ title: string; messages: ChatMessage[] }> {
+  const pages: Array<{ title: string; messages: ChatMessage[] }> = []
+  let current: { title: string; messages: ChatMessage[] } | undefined
+  for (const message of messages) {
+    const title = message.chapterTitle?.trim() || current?.title || '章节过渡'
+    if (!current || current.title !== title) {
+      current = { title, messages: [] }
+      pages.push(current)
+    }
+    current.messages.push(message)
+  }
+  return pages
 }
 
 function toErrorMessage(error: unknown) {

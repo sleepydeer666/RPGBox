@@ -19,6 +19,7 @@ const CHAPTER_END_PATTERN = /^\s*\[(?:篇章|章节)结束\]\s*$/u
 const UNIT_START_PATTERN = /^\s*\[单元开始\]\s*(.+?)\s*$/u
 const NEW_CHAPTER_PATTERN = /^\s*\[新章节\]\s*(.+?)\s*$/u
 const VISUAL_BLANK_LINE_PATTERN = /^[\s\u200B\u200C\u200D\u2060\uFEFF]*$/u
+const IGNORABLE_SEPARATOR_LINE_PATTERN = /^\s*-{3,}\s*$/u
 
 function normalizeChoices(value: unknown, context: ResponseParseContext): Choice[] {
   if (!Array.isArray(value)) return []
@@ -210,6 +211,7 @@ export function normalizeProtocolResponse(raw: string, context: ResponseParseCon
     let choicesStarted = false
     normalized = normalized.split(/\n/).map((line) => {
       const trimmed = line.trim()
+      if (isIgnorableSeparatorLine(trimmed)) return ''
       if (CHOICE_LINE_SINGLE_PATTERN.test(trimmed)) { choicesStarted = true; return line }
       if (choicesStarted) return line
       if (!trimmed || isProtocolLine(trimmed, context)) return line
@@ -233,6 +235,7 @@ export function protocolAnomalyLineIndexes(raw: string, context: ResponseParseCo
   return story.split(/\n/).map((line, index, lines) => {
     const trimmed = line.trim()
     if (VISUAL_BLANK_LINE_PATTERN.test(trimmed)) return -1
+    if (isIgnorableSeparatorLine(trimmed)) return -1
     if (CHOICE_LINE_SINGLE_PATTERN.test(trimmed)) { choicesStarted = true; return -1 }
     if (choicesStarted) return !isLooseStatusLine(trimmed, context) && !isStateLine(trimmed) && !isProgressLine(trimmed) ? index : -1
     if (parseStatusLine(trimmed) || isProgressLine(trimmed) || NARRATION_LINE_PATTERN.test(trimmed)) return -1
@@ -448,6 +451,10 @@ export function visibleStory(raw: string): string {
   return (marker >= 0 ? raw.slice(0, marker) : raw).trim()
 }
 
+function isIgnorableSeparatorLine(line: string): boolean {
+  return IGNORABLE_SEPARATOR_LINE_PATTERN.test(line)
+}
+
 export function hasProtocolAnomaly(raw: string, context: ResponseParseContext = {}): boolean {
   return protocolAnomalyLineIndexes(raw, context).length > 0
   /*
@@ -513,6 +520,7 @@ export function standardResponse(raw: string, context: ResponseParseContext = {}
   let choicesStarted = false
   const lines = story.split(/\n+/).map((line) => line.trim()).filter((line) => {
     if (!line) return false
+    if (isIgnorableSeparatorLine(line)) return false
     if (CHOICE_LINE_SINGLE_PATTERN.test(line)) { choicesStarted = true; return true }
     if (choicesStarted) return isLooseStatusLine(line, context) || isStateLine(line) || isProgressLine(line)
     return isStateLine(line) || isProgressLine(line) || NARRATION_LINE_PATTERN.test(line) || Boolean(parseDialogueLine(line, context))
@@ -545,7 +553,7 @@ export function parseAssistantResponse(raw: string, context: ResponseParseContex
   const choices = gameData?.choices?.length ? gameData.choices : extractTextChoices(story, context.narrativeModes)
   const storyWithoutFallbackChoices = story
     .split(/\n+/)
-    .filter((line) => !CHOICE_LINE_SINGLE_PATTERN.test(line) && !isStateLine(line) && !isProgressLine(line))
+    .filter((line) => !isIgnorableSeparatorLine(line) && !CHOICE_LINE_SINGLE_PATTERN.test(line) && !isStateLine(line) && !isProgressLine(line))
     .map((line) => line.match(NARRATION_LINE_PATTERN)?.[1]?.trim() ?? line)
     .join('\n')
     .trim()

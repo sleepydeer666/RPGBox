@@ -3,7 +3,7 @@ import type { Choice, GameSession } from '../types'
 export const CHAPTER_END_MARKER = '（结束章节）'
 export const CHAPTER_END_MARKER_PATTERN = /[（(]结束章节[）)]/u
 export const CHAPTER_ENDING_CHOICE_INSTRUCTION = `至少一个选项还必须在后续叙事模式标签之后标记${CHAPTER_END_MARKER}。`
-export const CHAPTER_CONTINUE_INSTRUCTION = '当前尽量不要生成章节结束的选项，保持故事推进。'
+export const CHAPTER_CONTINUE_INSTRUCTION = '尽量不要生成结束章节的选项，保持故事在当前场景下继续推进；如果章节已接近尾声，可以输出一个“收尾并结束本章（结束章节）”的选项。'
 export const PREFER_EROTIC_CHOICES_INSTRUCTION = '选项内容优先推动向色情方向发展。'
 export const CHAPTER_NAMING_INSTRUCTION = '紧接“[状态]”行输出“[新章节] 章节名称”。'
 const NEW_CHAPTER_DIRECTIONS_INSTRUCTION = '这些选项应涵盖不同角色、不同场景和不同故事方向。它们用于选择并开启下一章节，不是在结束章节；所有选项均不得添加“（结束章节）”标签。'

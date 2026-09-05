@@ -40,6 +40,8 @@ describe('RPG storage migration', () => {
     expect(loaded.games?.[0].recommendedChapterTurns).toBe(20)
     expect(loaded.games?.[0].aiSettings.useCompatiblePromptFormat).toBe(true)
     expect(loaded.games?.[0].aiSettings.warnOnProtocolAnomaly).toBe(true)
+    expect(preferenceMocks.set.mock.calls.some(([value]) => value.key === 'file:rpgbox-v2/migration/legacy-v1-backup.json')).toBe(true)
+    expect(preferenceMocks.set.mock.calls.some(([value]) => value.key === 'file:rpgbox-v2/global/state.json')).toBe(true)
   })
 
   it('defaults the format warning to disabled for older saved RPGs', async () => {

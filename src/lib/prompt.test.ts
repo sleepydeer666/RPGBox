@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFormatRepairApiMessages, buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnNarrativeContext, buildTurnNarrativeStyle, buildTurnOutputContract, buildTurnRequestContent, buildTurnRequestDebugContent, FORMAT_REPAIR_INSTRUCTION, normalizeAssistantMessageForContext, takeRecentConversationTurns, toApiMessages } from './prompt'
+import { buildFormatRepairApiMessages, buildLlmSpecialInstructionText, buildRpgTurnApiMessages, buildRpgTurnDebugSegments, buildSystemPrompt, buildTurnCharacterProfiles, buildTurnNarrativeContext, buildTurnNarrativeStyle, buildTurnOutputContract, buildTurnRequestContent, buildTurnRequestDebugContent, FORMAT_REPAIR_INSTRUCTION, normalizeAssistantMessageForContext, PORTRAIT_TAG_REPAIR_INSTRUCTION, takeRecentConversationTurns, toApiMessages } from './prompt'
 import type { ChatMessage } from '../types'
 
 describe('buildFormatRepairApiMessages', () => {
@@ -33,6 +33,21 @@ describe('buildFormatRepairApiMessages', () => {
 
     expect(messages.at(1)).toEqual({ role: 'user', content: '动态规则\n\n格式规则' })
     expect(messages.some((message) => message.content === '向前走')).toBe(false)
+  })
+
+  it('uses the portrait-tag repair instruction without restoring conversation history', () => {
+    const messages = buildFormatRepairApiMessages([
+      { title: '固定系统规则', role: 'system', content: '固定规则' },
+      { title: '历史剧情回复', role: 'assistant', content: '旧剧情' },
+      { title: '本轮输出契约', role: 'system', content: '立绘标签规则' },
+    ], '向前走', '缺少立绘标签的原文', PORTRAIT_TAG_REPAIR_INSTRUCTION)
+
+    expect(messages).toEqual([
+      { role: 'system', content: '固定规则' },
+      { role: 'system', content: '立绘标签规则' },
+      { role: 'assistant', content: '缺少立绘标签的原文' },
+      { role: 'user', content: PORTRAIT_TAG_REPAIR_INSTRUCTION },
+    ])
   })
 })
 
@@ -144,7 +159,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('NSFW设定：对触碰十分敏感')
     expect(prompt).not.toContain('角色状态栏：衣着：整齐')
     expect(prompt).not.toContain('### 露娜')
-    expect(prompt).toContain('系统提示词中的“本轮叙事风格设定”和最新用户消息中的“本轮相关人物设定”是本轮权威资料')
+    expect(prompt).toContain('系统提示词中的叙事风格设定（如有）和最新用户消息中的“本轮相关人物设定”是本轮权威资料')
     expect(prompt).not.toContain('常规模式状态包括：严肃、担忧、微笑、开心。')
     expect(prompt).not.toContain('NSFW 模式状态包括：微笑、性兴奋。')
     expect(prompt).not.toContain('常规模式下角色可选状态')
@@ -153,6 +168,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('"portraits"')
     expect(prompt).not.toContain('## 偏好的 NSFW 场景')
     expect(prompt).not.toContain('## 角色状态栏规则')
+    expect(prompt).not.toContain('## 世界观与故事背景')
+    expect(prompt).not.toContain('## 本轮叙事风格设定')
+    expect(prompt).not.toContain('## 叙事模式切换规则')
+    expect(prompt).not.toContain('暂无额外设定')
     expect(prompt).not.toContain('[角色名]状态：状态内容')
     expect(prompt).not.toContain('角色状态栏严格遵照“状态栏规则”书写。')
     expect(prompt).not.toContain('❤')
@@ -448,6 +467,29 @@ describe('turn output contract', () => {
     }, 'nsfw', 'normal')
     expect(style).toContain('### 切换前叙事模式（正常）\n日常风格。')
     expect(style).toContain('### 切换后叙事模式（NSFW）\n成人风格。')
+  })
+
+  it('does not inject empty character fields or empty mode-specific style sections', () => {
+    const profiles = buildTurnCharacterProfiles([{
+      id: 'npc-1', role: 'npc', name: '莉亚', gender: '', description: '', modeDescriptions: { normal: '' }, color: '#fff', portraits: [],
+    }], 'normal')
+    expect(profiles).toContain('### 莉亚\n- 身份：NPC')
+    expect(profiles).not.toContain('性别：')
+    expect(profiles).not.toContain('人物设定：')
+    expect(profiles).not.toContain('未设定')
+    expect(profiles).not.toContain('暂无额外设定')
+
+    expect(buildTurnNarrativeStyle({
+      storyStylePrompt: '',
+      modeStoryStylePrompts: { normal: '', nsfw: '成人风格。' },
+    }, 'normal')).toBe('')
+
+    const delayedStyle = buildTurnNarrativeStyle({
+      storyStylePrompt: '',
+      modeStoryStylePrompts: { normal: '', nsfw: '成人风格。' },
+    }, 'nsfw', 'normal')
+    expect(delayedStyle).not.toContain('切换前叙事模式')
+    expect(delayedStyle).toContain('### 切换后叙事模式（NSFW）\n成人风格。')
   })
 
   it('combines global and current-mode narrative style without including other modes', () => {

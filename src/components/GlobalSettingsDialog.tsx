@@ -124,7 +124,7 @@ export default function GlobalSettingsDialog(props: Props) {
     <div className="modal-layer" role="dialog" aria-modal="true">
       <button className="backdrop" onClick={finish} aria-label="关闭" />
       <section className="modal settings-modal">
-        <div className="modal-head"><div><span className="eyebrow">GLOBAL</span><h2>全局设置</h2></div><button className="icon-button" onClick={finish} title="关闭"><X size={20} /></button></div>
+        <div className="modal-head"><div><span className="eyebrow">AI</span><h2>AI配置</h2></div><button className="icon-button" onClick={finish} title="关闭"><X size={20} /></button></div>
         <div className="settings-grid">
           <nav className="provider-nav">
             {draftProviders.map((provider) => <button className={provider.id === active.id ? 'active' : ''} key={provider.id} onClick={() => setDraftActiveProviderId(provider.id)}><span className={provider.apiKey ? 'status-dot online' : 'status-dot'} />{provider.name}</button>)}

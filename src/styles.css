@@ -676,6 +676,40 @@ textarea:focus-visible {
 .choice-scene {
   width: min(920px, 100%);
 }
+
+.status-controls-toggle {
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  position: relative;
+  flex: 0 0 30px;
+  border: 1px solid rgba(229, 207, 158, 0.55);
+  border-radius: 50%;
+  background: rgba(18, 19, 17, 0.84);
+  color: #f0dba7;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.status-controls-toggle-mark {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(18, 19, 17, 0.95);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.status-controls-toggle.enabled .status-controls-toggle-mark { background: #39b879; color: #07150d; }
+.status-controls-toggle.disabled .status-controls-toggle-mark { background: #c94b4b; color: #fff5f2; }
 .alert-command { color: #e06a6a; }
 
 .desktop-runtime .story-scene {
@@ -1141,6 +1175,31 @@ textarea:focus-visible {
   color: var(--gold);
 }
 
+.drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-toggle-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--gold);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.theme-toggle-button:hover,
+.theme-toggle-button:focus-visible {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
 .drawer-footer-actions button:disabled {
   opacity: 0.38;
   cursor: default;
@@ -1552,6 +1611,37 @@ textarea:focus-visible {
   cursor: default;
 }
 
+[data-theme="light"] {
+  color: #1b1c19;
+  background: #f4f4f0;
+  --bg: #f4f4f0;
+  --surface: #ffffff;
+  --surface-raised: #eeeeea;
+  --line: #d2d3cd;
+  --line-strong: #aeb1a8;
+  --text: #1b1c19;
+  --muted: #62675f;
+  --gold: #7c5b1c;
+  --gold-dark: #9a762f;
+  --teal: #277b6e;
+  --danger: #b33f38;
+}
+
+[data-theme="light"] .rpg-stage-shell { background: #e9e9e5; }
+[data-theme="light"] .rpg-stage { background-color: #f4f4f0; background-image: linear-gradient(rgba(124, 91, 28, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(124, 91, 28, 0.045) 1px, transparent 1px); }
+[data-theme="light"] .game-drawer,
+[data-theme="light"] .scene-drawer,
+[data-theme="light"] .topbar,
+[data-theme="light"] .modal,
+[data-theme="light"] .interaction-dock { background: var(--surface); }
+[data-theme="light"] .composer { background: var(--surface-raised); }
+[data-theme="light"] .composer textarea::placeholder { color: var(--muted); }
+[data-theme="light"] .dialogue-box p,
+[data-theme="light"] .onboarding-dialogue p { color: var(--text); }
+[data-theme="light"] .game-list-editor input,
+[data-theme="light"] .drawer-dialog input,
+[data-theme="light"] .drawer-dialog textarea { background: var(--surface); }
+
 .drawer-footer-actions button {
   flex-direction: column;
   gap: 3px;
@@ -1684,6 +1774,208 @@ textarea:focus-visible {
   .onboarding-dialogue p { font-size: 17px; line-height: 1.7; }
   .onboarding-dock { min-height: 64px; padding-inline: 10px; grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr); gap: 6px; }
   .onboarding-dock button { padding-inline: 9px; }
+}
+
+/* Light theme: keep character/scene inline colors, normalize application chrome. */
+[data-theme="light"] .stage-context strong,
+[data-theme="light"] .topbar-action-button,
+[data-theme="light"] .provider-pill,
+[data-theme="light"] .game-list-item,
+[data-theme="light"] .game-list-item strong,
+[data-theme="light"] .game-list-item small,
+[data-theme="light"] .game-list-actions button,
+[data-theme="light"] .story-message,
+[data-theme="light"] .player-action,
+[data-theme="light"] .history-line,
+[data-theme="light"] .prompt-preview-modal pre,
+[data-theme="light"] .character-status-content,
+[data-theme="light"] .character-status-window header,
+[data-theme="light"] .character-status-tabs button,
+[data-theme="light"] .character-status-window header > span:last-child,
+[data-theme="light"] .memory-preview p,
+[data-theme="light"] .memory-preview > span,
+[data-theme="light"] .library-state,
+[data-theme="light"] .library-state h1,
+[data-theme="light"] .secondary-button,
+[data-theme="light"] .text-button,
+[data-theme="light"] .danger-button,
+[data-theme="light"] .close-chapter-button,
+[data-theme="light"] .continue-response-button,
+[data-theme="light"] .choice-button,
+[data-theme="light"] .choice-text,
+[data-theme="light"] .debug-tab-content,
+[data-theme="light"] .debug-prompt-segment,
+[data-theme="light"] .debug-prompt-group,
+[data-theme="light"] .memory-entry,
+[data-theme="light"] .memory-entry-head,
+[data-theme="light"] .history-chapter-pagination button {
+  color: var(--text);
+}
+
+[data-theme="light"] .stage-context,
+[data-theme="light"] .status-row span,
+[data-theme="light"] .onboarding-speaker span,
+[data-theme="light"] .character-status-empty,
+[data-theme="light"] .memory-preview > span,
+[data-theme="light"] .library-state small,
+[data-theme="light"] .history-chapter-pagination small,
+[data-theme="light"] .history-empty,
+[data-theme="light"] .section-meta,
+[data-theme="light"] .debug-empty,
+[data-theme="light"] .memory-capacity-note,
+[data-theme="light"] .memory-tab-content textarea::placeholder,
+[data-theme="light"] .composer textarea::placeholder {
+  color: var(--muted);
+}
+
+[data-theme="light"] .rpg-state-trigger,
+[data-theme="light"] .rpg-state-menu,
+[data-theme="light"] .character-status-button,
+[data-theme="light"] .character-status-window,
+[data-theme="light"] .choice-overlay,
+[data-theme="light"] .dialogue-box,
+[data-theme="light"] .interaction-notice,
+[data-theme="light"] .onboarding-dialogue,
+[data-theme="light"] .history-jump-controls,
+[data-theme="light"] .debug-output-section,
+[data-theme="light"] .debug-prompt-segment .debug-response,
+[data-theme="light"] .memory-rule-section,
+[data-theme="light"] .memory-entry,
+[data-theme="light"] .remote-model-picker,
+[data-theme="light"] .llm-special-instructions-options label,
+[data-theme="light"] .role-import-options,
+[data-theme="light"] .modal,
+[data-theme="light"] .drawer-dialog,
+[data-theme="light"] .game-list-item.active,
+[data-theme="light"] .narrative-mode-row,
+[data-theme="light"] .added-model-row,
+[data-theme="light"] .model-picker-head,
+[data-theme="light"] .model-picker-footer {
+  background: var(--surface);
+  color: var(--text);
+}
+
+[data-theme="light"] .rpg-state-menu,
+[data-theme="light"] .character-status-window,
+[data-theme="light"] .narrative-mode-row,
+[data-theme="light"] .choice-button,
+[data-theme="light"] .choice-overlay,
+[data-theme="light"] .debug-output-section,
+[data-theme="light"] .remote-model-picker,
+[data-theme="light"] .memory-entry {
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .rpg-state-trigger,
+[data-theme="light"] .character-status-button,
+[data-theme="light"] .choice-button,
+[data-theme="light"] .close-chapter-button,
+[data-theme="light"] .continue-response-button,
+[data-theme="light"] .secondary-button,
+[data-theme="light"] .text-button,
+[data-theme="light"] .history-chapter-pagination button,
+[data-theme="light"] .history-jump-controls,
+[data-theme="light"] .llm-special-instructions-options label,
+[data-theme="light"] .role-mode-tabs button {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+[data-theme="light"] .rpg-state-options button:hover,
+[data-theme="light"] .rpg-state-options button.active,
+[data-theme="light"] .choice-button:hover,
+[data-theme="light"] .choice-button.selected,
+[data-theme="light"] .history-jump-controls button:hover,
+[data-theme="light"] .history-jump-controls button:focus-visible,
+[data-theme="light"] .game-list-order button:hover:not(:disabled),
+[data-theme="light"] .character-list > button.active,
+[data-theme="light"] .provider-nav button:hover,
+[data-theme="light"] .provider-nav button.active,
+[data-theme="light"] .game-settings-tabs button.active {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+[data-theme="light"] .composer,
+[data-theme="light"] .form-section input,
+[data-theme="light"] .form-section textarea,
+[data-theme="light"] .form-section select,
+[data-theme="light"] .large-textarea,
+[data-theme="light"] .drawer-dialog-content input,
+[data-theme="light"] .drawer-dialog-content select,
+[data-theme="light"] .drawer-dialog-content textarea,
+[data-theme="light"] .game-list-editor input,
+[data-theme="light"] .memory-tab-content textarea,
+[data-theme="light"] .memory-limit-setting input,
+[data-theme="light"] .narrative-mode-row .narrative-mode-name-input,
+[data-theme="light"] .model-search input,
+[data-theme="light"] .game-prompt-textarea {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .rpg-state-lock-option,
+[data-theme="light"] .character-status-window header,
+[data-theme="light"] .game-list-actions,
+[data-theme="light"] .memory-tabs,
+[data-theme="light"] .game-settings-tabs,
+[data-theme="light"] .history-chapter-pagination,
+[data-theme="light"] .modal-footer,
+[data-theme="light"] .model-picker-head,
+[data-theme="light"] .model-picker-footer {
+  border-color: var(--line);
+}
+
+[data-theme="light"] .story-area,
+[data-theme="light"] .empty-library-main,
+[data-theme="light"] .sidebar,
+[data-theme="light"] .onboarding-guide,
+[data-theme="light"] .onboarding-dock,
+[data-theme="light"] .onboarding-scene {
+  background-color: var(--bg);
+}
+
+[data-theme="light"] .onboarding-dock button {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .onboarding-dock .onboarding-next,
+[data-theme="light"] .primary-button,
+[data-theme="light"] .send-button {
+  color: #fff;
+}
+
+[data-theme="light"] .choice-button.selected > span:first-child {
+  color: #fff;
+}
+
+[data-theme="light"] .history-line.player {
+  color: var(--text);
+}
+
+[data-theme="light"] .character-status-tabs button.active,
+[data-theme="light"] .history-line strong,
+[data-theme="light"] .history-chapter-pagination strong,
+[data-theme="light"] .section-label,
+[data-theme="light"] .eyebrow {
+  color: var(--gold);
+}
+
+[data-theme="light"] .inline-error,
+[data-theme="light"] .drawer-notice.error,
+[data-theme="light"] .debug-anomaly-line,
+[data-theme="light"] .model-required-warning {
+  color: var(--danger);
+}
+
+[data-theme="light"] .memory-tabs button,
+[data-theme="light"] .game-settings-tabs button,
+[data-theme="light"] .provider-nav button,
+[data-theme="light"] .character-list > button {
+  color: var(--muted);
 }
 
 .topbar-action-button.memory-processing:disabled {
@@ -4521,8 +4813,60 @@ textarea:focus-visible {
   width: min(760px, 100%);
   height: min(760px, 92vh);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   position: relative;
+}
+
+.history-chapter-pagination {
+  min-width: 0;
+  min-height: 48px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-chapter-pagination button {
+  width: 30px;
+  min-height: 30px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.history-chapter-pagination button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.history-chapter-pagination > span {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  text-align: center;
+}
+
+.history-chapter-pagination strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gold);
+}
+
+.history-chapter-pagination small {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .game-settings-modal,
@@ -5016,4 +5360,240 @@ textarea:focus-visible {
   .provider-pill .provider-icon {
     display: block;
   }
+}
+
+/* Final light-theme pass. This is intentionally last so component defaults cannot
+   reintroduce dark surfaces after the theme has been selected. */
+[data-theme="light"] .topbar-action-button,
+[data-theme="light"] .provider-pill,
+[data-theme="light"] .game-list-item,
+[data-theme="light"] .game-list-item strong,
+[data-theme="light"] .game-list-item small,
+[data-theme="light"] .game-list-actions button,
+[data-theme="light"] .stage-context strong,
+[data-theme="light"] .story-message,
+[data-theme="light"] .player-action,
+[data-theme="light"] .dialogue-box p,
+[data-theme="light"] .choice-button,
+[data-theme="light"] .history-line,
+[data-theme="light"] .history-line.player,
+[data-theme="light"] .prompt-preview-modal pre,
+[data-theme="light"] .secondary-button,
+[data-theme="light"] .text-button,
+[data-theme="light"] .character-status-content,
+[data-theme="light"] .library-state h1,
+[data-theme="light"] .library-state {
+  color: var(--text);
+}
+
+[data-theme="light"] .stage-context,
+[data-theme="light"] .status-row span,
+[data-theme="light"] .character-status-window header > span:last-child,
+[data-theme="light"] .character-status-tabs button,
+[data-theme="light"] .character-status-empty,
+[data-theme="light"] .memory-preview p,
+[data-theme="light"] .memory-preview > span,
+[data-theme="light"] .library-state small,
+[data-theme="light"] .history-chapter-pagination small,
+[data-theme="light"] .history-empty,
+[data-theme="light"] .memory-tab-content textarea::placeholder,
+[data-theme="light"] .composer textarea::placeholder,
+[data-theme="light"] .debug-empty {
+  color: var(--muted);
+}
+
+[data-theme="light"] .rpg-state-trigger,
+[data-theme="light"] .rpg-state-menu,
+[data-theme="light"] .choice-overlay,
+[data-theme="light"] .dialogue-box,
+[data-theme="light"] .character-status-window,
+[data-theme="light"] .interaction-notice,
+[data-theme="light"] .history-jump-controls,
+[data-theme="light"] .memory-entry,
+[data-theme="light"] .debug-output-section,
+[data-theme="light"] .debug-prompt-segment .debug-response,
+[data-theme="light"] .narrative-mode-row,
+[data-theme="light"] .llm-special-instructions-options label,
+[data-theme="light"] .remote-model-picker,
+[data-theme="light"] .modal,
+[data-theme="light"] .drawer-dialog {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .choice-button,
+[data-theme="light"] .secondary-button,
+[data-theme="light"] .text-button,
+[data-theme="light"] .history-chapter-pagination button,
+[data-theme="light"] .onboarding-dock button,
+[data-theme="light"] .role-mode-tabs button {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+[data-theme="light"] .composer,
+[data-theme="light"] .form-section input,
+[data-theme="light"] .form-section textarea,
+[data-theme="light"] .form-section select,
+[data-theme="light"] .large-textarea,
+[data-theme="light"] .drawer-dialog-content input,
+[data-theme="light"] .drawer-dialog-content select,
+[data-theme="light"] .drawer-dialog-content textarea,
+[data-theme="light"] .game-list-editor input,
+[data-theme="light"] .memory-tab-content textarea,
+[data-theme="light"] .memory-limit-setting input,
+[data-theme="light"] .narrative-mode-row .narrative-mode-name-input,
+[data-theme="light"] .game-prompt-textarea {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .story-area,
+[data-theme="light"] .empty-library-main,
+[data-theme="light"] .sidebar,
+[data-theme="light"] .rpg-stage-shell,
+[data-theme="light"] .rpg-stage,
+[data-theme="light"] .onboarding-guide,
+[data-theme="light"] .onboarding-scene,
+[data-theme="light"] .onboarding-dock {
+  background-color: var(--bg);
+}
+
+[data-theme="light"] .rpg-state-options button:hover,
+[data-theme="light"] .rpg-state-options button.active,
+[data-theme="light"] .choice-button:hover,
+[data-theme="light"] .choice-button.selected,
+[data-theme="light"] .history-jump-controls button:hover,
+[data-theme="light"] .history-jump-controls button:focus-visible,
+[data-theme="light"] .game-list-item.active,
+[data-theme="light"] .character-list > button.active,
+[data-theme="light"] .provider-nav button.active,
+[data-theme="light"] .provider-nav button:hover {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+[data-theme="light"] .character-status-tabs button.active,
+[data-theme="light"] .history-line strong,
+[data-theme="light"] .history-chapter-pagination strong,
+[data-theme="light"] .selection-prompt,
+[data-theme="light"] .section-label,
+[data-theme="light"] .eyebrow {
+  color: var(--gold);
+}
+
+[data-theme="light"] .primary-button,
+[data-theme="light"] .send-button,
+[data-theme="light"] .onboarding-dock .onboarding-next {
+  color: #fff;
+}
+
+/* Page-specific controls that have intentionally dark component defaults. */
+[data-theme="light"] .status-controls-toggle,
+[data-theme="light"] .character-status-button {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--gold);
+}
+
+[data-theme="light"] .status-controls-toggle-mark {
+  border-color: var(--surface);
+}
+
+[data-theme="light"] .dialogue-box,
+[data-theme="light"] .narration-panel {
+  background: #fff;
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+[data-theme="light"] .dialogue-box p,
+[data-theme="light"] .narration-panel p {
+  color: var(--text);
+}
+
+[data-theme="light"] .speaker-line strong,
+[data-theme="light"] .speaker-line span {
+  color: var(--text);
+}
+
+[data-theme="light"] .debug-tabs,
+[data-theme="light"] .debug-token-usage > div,
+[data-theme="light"] .debug-prompt-group,
+[data-theme="light"] .debug-response {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .debug-tabs button,
+[data-theme="light"] .debug-section h3,
+[data-theme="light"] .debug-token-usage span,
+[data-theme="light"] .debug-prompt-group > summary small,
+[data-theme="light"] .debug-prompt-group > summary svg {
+  color: var(--muted);
+}
+
+[data-theme="light"] .debug-tabs button.active,
+[data-theme="light"] .debug-prompt-group > summary,
+[data-theme="light"] .debug-prompt-segment h3 {
+  color: var(--text);
+}
+
+[data-theme="light"] .character-mode-tabs,
+[data-theme="light"] .narrative-style-tabs {
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+[data-theme="light"] .character-mode-tabs button,
+[data-theme="light"] .narrative-style-tabs button,
+[data-theme="light"] .character-editor input,
+[data-theme="light"] .character-editor select,
+[data-theme="light"] .character-editor textarea,
+[data-theme="light"] .form-section select,
+[data-theme="light"] .character-editor .field-description,
+[data-theme="light"] .portrait-settings-row img {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="light"] .character-mode-tabs button.active,
+[data-theme="light"] .narrative-style-tabs button.active {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+[data-theme="light"] .drawer-footer-actions {
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+[data-theme="light"] .drawer-footer-actions button {
+  background: var(--surface);
+  color: var(--text);
+}
+
+[data-theme="light"] .drawer-footer-actions button:hover {
+  background: var(--surface-raised);
+  color: var(--gold);
+}
+
+[data-theme="light"] .preset-rpg-option {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+[data-theme="light"] .preset-rpg-option.selected {
+  background: var(--surface-raised);
+}
+
+[data-theme="light"] .preset-rpg-option input[type="radio"],
+[data-theme="light"] .role-import-options input[type="radio"],
+[data-theme="light"] input[type="checkbox"] {
+  accent-color: var(--gold);
 }

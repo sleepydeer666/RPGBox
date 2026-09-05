@@ -63,9 +63,10 @@ export default function PortraitCropDialog({ file, onCancel, onConfirm }: Props)
       const sourceY = -imageTop / scale
       const sourceWidth = frameSize.width / scale
       const sourceHeight = frameSize.height / scale
+      const outputSize = getPortraitOutputSize(sourceWidth, sourceHeight)
       const canvas = document.createElement('canvas')
-      canvas.width = 1200
-      canvas.height = 1800
+      canvas.width = outputSize.width
+      canvas.height = outputSize.height
       const context = canvas.getContext('2d')
       if (!context) throw new Error('无法创建图片裁剪画布')
       context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
@@ -99,7 +100,7 @@ export default function PortraitCropDialog({ file, onCancel, onConfirm }: Props)
             <button className="icon-button" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }) }} title="重置取景"><RotateCcw size={17} /></button>
           </div>
         </div>
-        <div className="modal-footer"><span>拖动图片调整取景 · 输出 1200×1800 PNG</span><div className="modal-footer-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" onClick={() => void confirmCrop()} disabled={!naturalSize.width || saving}><Check size={16} />{saving ? '保存中' : '确认裁剪'}</button></div></div>
+        <div className="modal-footer"><span>拖动图片调整取景 · 最大输出 800×1200 PNG</span><div className="modal-footer-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" onClick={() => void confirmCrop()} disabled={!naturalSize.width || saving}><Check size={16} />{saving ? '保存中' : '确认裁剪'}</button></div></div>
       </section>
     </div>
   )
@@ -117,5 +118,14 @@ export function clampOffset(offset: { x: number; y: number }, image: Size, frame
   return {
     x: Math.max(-maxX, Math.min(maxX, offset.x)) || 0,
     y: Math.max(-maxY, Math.min(maxY, offset.y)) || 0,
+  }
+}
+
+export function getPortraitOutputSize(width: number, height: number): Size {
+  if (!width || !height) return { width: 0, height: 0 }
+  const scale = Math.min(1, 800 / width, 1200 / height)
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
   }
 }

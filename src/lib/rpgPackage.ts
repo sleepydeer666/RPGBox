@@ -3,6 +3,8 @@ import JSZip from 'jszip'
 import { copyPortraitFile, readPortraitBase64, savePortraitFile } from './portraits'
 import type { CharacterProfile, GameSession, PortraitGroup } from '../types'
 import { normalizeGameNarrativeModes } from './narrativeModes'
+import { flattenConversationTurns, groupConversationTurns, splitMessagesByChapter, takeRecentConversationTurns, type ConversationTurn } from './chatChunks'
+import { BlobWriter, TextWriter } from '@zip.js/zip.js'
 import { downloadBlob } from '../platform/browserDownload'
 import { isAndroidRuntime } from '../platform/runtime'
 
@@ -12,6 +14,7 @@ export const RPGBOX_DIRECTORY_LABEL = isAndroidRuntime() ? '内部存储/Documen
 export interface RpgExportOptions {
   settings: boolean
   characters: boolean
+  onPortraitProgress?: (completed: number, total: number) => void
 }
 
 export type RpgboxImportSource = File
@@ -40,33 +43,47 @@ export interface PackageSections {
   nsfw?: { nsfwScenePrompt: string; characterSettings?: SerializedCharacterNsfwSettings[] }
 }
 
+interface RpgboxV2Manifest {
+  format: 'rpgbox'
+  version: 2
+  title: string
+  sections: { settings?: boolean; characters?: boolean }
+}
+
 export async function exportRpgbox(game: GameSession, options: RpgExportOptions): Promise<string> {
   if (!options.settings && !options.characters) throw new Error('请至少选择一项导出内容')
   const zip = new JSZip()
-  const sections: PackageSections = {}
-
-  if (options.settings) sections.settings = exportSettings(game)
-  if (options.settings || options.characters) sections.nsfw = {
-    nsfwScenePrompt: options.settings ? game.nsfwScenePrompt : '',
+  const manifest: RpgboxV2Manifest = {
+    format: 'rpgbox',
+    version: 2,
+    title: game.title,
+    sections: { settings: options.settings, characters: options.characters },
   }
-  if (options.characters) {
-    sections.characters = []
-    for (const character of game.characters) {
-      const portraits: SerializedPortrait[] = []
-      for (const portrait of character.portraits) {
-        const groups: PortraitGroup[] = portrait.groups ?? ['normal']
-        const extension = fileExtension(portrait.uri)
-        const assetPath = `portraits/${safePathPart(character.id)}/${safePathPart(portrait.id)}.${extension}`
-        // Portraits are already compressed image files; storing them avoids a costly DEFLATE pass.
-        zip.file(assetPath, await readPortraitBase64(portrait.uri), { base64: true, compression: 'STORE' })
-        const { uri: _uri, ...metadata } = portrait
-        portraits.push({ ...metadata, groups, assetPath })
+  zip.file('manifest.json', JSON.stringify(manifest))
+  if (options.settings) {
+    const { messages: _messages, gameState: _gameState, narrative: _narrative, memory: _memory, rollbackLog: _rollbackLog, ...settings } = exportSettings(game)
+    zip.file('settings.json', JSON.stringify(settings))
+    zip.file('runtime-state.json', JSON.stringify({ gameState: game.gameState, narrative: game.narrative, memory: game.memory, rollbackLog: game.rollbackLog ?? [] }))
+    const turns = groupConversationTurns(game.messages)
+    const recentTurns = takeRecentConversationTurns(turns, 50)
+    const chunks = splitMessagesByChapter(game.messages, 50)
+    const chapters: Array<{ id: string; title: string; turnCount: number; parts: string[] }> = []
+    let chapter: typeof chapters[number] | undefined
+    for (const [index, chunk] of chunks.entries()) {
+      const title = chunk.chapterTitle?.trim() || '章节过渡'
+      if (!chapter || chapter.title !== title) {
+        chapter = { id: `chapter-${String(chapters.length + 1).padStart(6, '0')}`, title, turnCount: 0, parts: [] }
+        chapters.push(chapter)
       }
-      sections.characters.push({ ...character, modeDescriptions: character.modeDescriptions ?? {}, portraits })
+      const path = `chat/chapters/${chapter.id}/part-${String(chapter.parts.length + 1).padStart(6, '0')}.json`
+      chapter.parts.push(path)
+      chapter.turnCount += chunk.turns.filter((turn) => turn.messages.some((message) => message.role === 'user')).length
+      zip.file(path, JSON.stringify({ sequence: index, turns: chunk.turns }))
     }
+    zip.file('chat/recent.json', JSON.stringify({ turns: recentTurns }))
+    zip.file('chat/chapter-index.json', JSON.stringify({ recentTurnCount: recentTurns.filter((turn) => turn.messages.some((message) => message.role === 'user')).length, chapters }))
   }
-
-  zip.file('rpg.xml', createRpgboxXml(game.title, sections))
+  if (options.characters) zip.file('characters.json', JSON.stringify(await serializeCharacters(game, zip, options.onPortraitProgress)))
   await ensureRpgboxDirectory()
   const fileName = `${safeFileName(game.title || '未命名RPG')}-${fileStamp()}.rpgbox`
   const path = `${RPGBOX_DIRECTORY}/${fileName}`
@@ -117,11 +134,17 @@ async function writeZipInChunks(zip: JSZip, path: string): Promise<void> {
 export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSession, options: RpgboxImportOptions = {}): Promise<GameSession> {
   const fileName = source.name
   if (!/^[^/\\]+\.rpgbox$/iu.test(fileName)) throw new Error('无效的 RPGBox 文件名')
-  const { BlobReader, BlobWriter, TextWriter, ZipReader } = await import('@zip.js/zip.js')
+    const { BlobReader, ZipReader } = await import('@zip.js/zip.js')
   const zip = new ZipReader(new BlobReader(source), { useWebWorkers: false })
   try {
     const entries = await zip.getEntries()
     const files = new Map(entries.filter((entry) => !entry.directory).map((entry) => [entry.filename, entry]))
+    const v2Manifest = files.get('manifest.json')
+    if (v2Manifest) {
+      const manifest = JSON.parse(await v2Manifest.getData(new TextWriter())) as RpgboxV2Manifest
+      if (manifest.format !== 'rpgbox' || manifest.version !== 2) throw new Error('不支持的 RPGBox 文件版本')
+      return importRpgboxV2(files, manifest, baseGame, options)
+    }
     const xmlFile = files.get('rpg.xml')
     if (!xmlFile || xmlFile.directory) throw new Error('RPGBox 文件缺少 rpg.xml')
     const sections = parseRpgboxXml(await xmlFile.getData(new TextWriter()))
@@ -135,6 +158,67 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
   } finally {
     await zip.close()
   }
+}
+
+async function serializeCharacters(game: GameSession, zip: JSZip, onPortraitProgress?: (completed: number, total: number) => void): Promise<SerializedCharacter[]> {
+  const characters: SerializedCharacter[] = []
+  const totalPortraits = game.characters.reduce((total, character) => total + character.portraits.length, 0)
+  let completedPortraits = 0
+  if (totalPortraits > 0) onPortraitProgress?.(0, totalPortraits)
+  for (const character of game.characters) {
+    const portraits: SerializedPortrait[] = []
+    for (const portrait of character.portraits) {
+      const groups: PortraitGroup[] = portrait.groups ?? ['normal']
+      const extension = fileExtension(portrait.uri)
+      const assetPath = `portraits/${safePathPart(character.id)}/${safePathPart(portrait.id)}.${extension}`
+      zip.file(assetPath, decodeBase64Bytes(await readPortraitBase64(portrait.uri)), { compression: 'STORE' })
+      completedPortraits += 1
+      if (totalPortraits > 0) onPortraitProgress?.(completedPortraits, totalPortraits)
+      const { uri: _uri, ...metadata } = portrait
+      portraits.push({ ...metadata, groups, assetPath })
+    }
+    characters.push({ ...character, modeDescriptions: character.modeDescriptions ?? {}, portraits })
+  }
+  return characters
+}
+
+async function importRpgboxV2(files: Map<string, any>, manifest: RpgboxV2Manifest, baseGame: GameSession, options: RpgboxImportOptions): Promise<GameSession> {
+  const readText = async (path: string) => {
+    const file = files.get(path)
+    return file ? file.getData(new TextWriter()) : undefined
+  }
+  let game: GameSession = { ...baseGame }
+  if (manifest.sections.settings) {
+    const settingsText = await readText('settings.json')
+    const runtimeText = await readText('runtime-state.json')
+    if (!settingsText || !runtimeText) throw new Error('RPGBox 文件缺少设置或运行状态')
+    const settings = JSON.parse(settingsText) as Record<string, unknown>
+    const runtime = JSON.parse(runtimeText) as Partial<GameSession>
+    const recentText = await readText('chat/recent.json')
+    const indexText = await readText('chat/chapter-index.json')
+    if (!recentText || !indexText) throw new Error('RPGBox 文件缺少聊天记录索引')
+    const index = JSON.parse(indexText) as { chapters: Array<{ parts: string[] }> }
+    const turns: ConversationTurn[] = []
+    for (const chapter of index.chapters ?? []) for (const part of chapter.parts ?? []) {
+      const partText = await readText(part)
+      if (partText) turns.push(...(JSON.parse(partText) as { turns: ConversationTurn[] }).turns)
+    }
+    const recent = JSON.parse(recentText) as { turns: ConversationTurn[] }
+    const messages = turns.length ? flattenConversationTurns(turns) : flattenConversationTurns(recent.turns)
+    game = { ...game, ...importSettings(settings), ...runtime, messages }
+  }
+  if (manifest.sections.characters) {
+    const charactersFile = files.get('characters.json')
+    if (!charactersFile) throw new Error('RPGBox 文件缺少角色数据')
+    const characters = JSON.parse(await charactersFile.getData(new TextWriter())) as SerializedCharacter[]
+    game = await importRpgboxSections({ characters }, game, options, async (characterId, assetPath) => {
+      const asset = files.get(assetPath)
+      if (!asset) return undefined
+      const blob = await asset.getData(new BlobWriter())
+      return savePortraitFile(baseGame.id, characterId, new File([blob], assetPath.split('/').at(-1) ?? 'portrait.png'))
+    })
+  }
+  return normalizeGameNarrativeModes({ ...game, id: baseGame.id, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) })
 }
 
 export async function importRpgboxSections(
@@ -242,11 +326,12 @@ function exportSettings(game: GameSession): Record<string, unknown> {
     narrative: game.narrative,
     memory: game.memory,
     rollbackLog: game.rollbackLog ?? [],
+    showStatusControls: game.showStatusControls ?? true,
   }
 }
 
 function importSettings(settings: Record<string, unknown>): Partial<GameSession> {
-  const allowed = ['systemPrompt', 'narrativeModes', 'newStoryChoiceCount', 'storyStylePrompt', 'modeStoryStylePrompts', 'chapterTransitionRules', 'narrativeModeRulesPrompt', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'clearStatusBarAfterChapter', 'nsfwScenePrompt', 'worldSettingPrompt', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
+  const allowed = ['systemPrompt', 'narrativeModes', 'newStoryChoiceCount', 'storyStylePrompt', 'modeStoryStylePrompts', 'chapterTransitionRules', 'narrativeModeRulesPrompt', 'recommendedChapterTurnsEnabled', 'recommendedChapterTurns', 'statusRulesPrompt', 'clearStatusBarAfterChapter', 'nsfwScenePrompt', 'worldSettingPrompt', 'showStatusControls', 'messages', 'gameState', 'narrative', 'memory', 'rollbackLog'] as const
   const imported = Object.fromEntries(allowed.filter((key) => settings[key] !== undefined).map((key) => [key, settings[key]])) as Partial<GameSession>
   if (settings.newStoryChoiceCount !== undefined) {
     const parsed = Number(settings.newStoryChoiceCount)
@@ -279,6 +364,11 @@ function encodeBase64Bytes(bytes: Uint8Array): string {
   let binary = ''
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
   return btoa(binary)
+}
+
+function decodeBase64Bytes(value: string): Uint8Array {
+  const binary = atob(value)
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
 function decodeBase64Utf8(value: string): string {
