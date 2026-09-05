@@ -62,18 +62,51 @@ function bundledRpgAssets(includePackages: boolean, sourceDirectory: string) {
       const packages = [] as Array<{
         key: string
         fileName: string
+        formatVersion: 1 | 2
         title: string
         hasNsfw: boolean
-        xmlUrl: string
-        portraits: Record<string, string>
+        xmlUrl?: string
+        portraits?: Record<string, string>
+        files?: Record<string, string>
       }>
 
       for (const [index, fileName] of fileNames.entries()) {
         const zip = await JSZip.loadAsync(readFileSync(resolve(sourceDirectory, fileName)))
-        const xml = zip.file('rpg.xml')
-        if (!xml) throw new Error(`${fileName} is missing rpg.xml`)
-        const xmlText = await xml.async('string')
         const packageDirectory = `bundled-rpg/package-${index + 1}`
+        const manifest = zip.file('manifest.json')
+        if (manifest) {
+          const manifestText = await manifest.async('string')
+          let parsedManifest: { format?: string; version?: number; title?: string }
+          try { parsedManifest = JSON.parse(manifestText) as typeof parsedManifest } catch { throw new Error(`${fileName} has an invalid manifest.json`) }
+          if (parsedManifest.format !== 'rpgbox' || parsedManifest.version !== 2) throw new Error(`${fileName} has an unsupported manifest.json`)
+          const files: Record<string, string> = {}
+          for (const entry of Object.values(zip.files)) {
+            if (entry.dir || entry.name.includes('..')) continue
+            const assetFileName = `${packageDirectory}/${entry.name}`
+            this.emitFile({ type: 'asset', fileName: assetFileName, source: await entry.async('uint8array') })
+            files[entry.name] = `./${assetFileName}`
+          }
+          let settings: { nsfwScenePrompt?: string; modeStoryStylePrompts?: Record<string, string> } = {}
+          const settingsFile = zip.file('settings.json')
+          if (settingsFile) {
+            try { settings = JSON.parse(await settingsFile.async('string')) as typeof settings } catch { /* runtime import reports malformed data */ }
+          }
+          let characters: Array<{ modeDescriptions?: Record<string, string> }> = []
+          const charactersFile = zip.file('characters.json')
+          if (charactersFile) {
+            try { characters = JSON.parse(await charactersFile.async('string')) as typeof characters } catch { /* runtime import reports malformed data */ }
+          }
+          const hasNsfw = Boolean(
+            settings.nsfwScenePrompt?.trim()
+            || settings.modeStoryStylePrompts?.nsfw?.trim()
+            || characters.some((character) => character.modeDescriptions?.nsfw?.trim()),
+          )
+          packages.push({ key: `file:${fileName}`, fileName, formatVersion: 2, title: parsedManifest.title || fileName.replace(/\.rpgbox$/iu, ''), hasNsfw, files })
+          continue
+        }
+        const xml = zip.file('rpg.xml')
+        if (!xml) throw new Error(`${fileName} is missing rpg.xml or a V2 manifest.json`)
+        const xmlText = await xml.async('string')
         const xmlFileName = `${packageDirectory}/rpg.xml`
         this.emitFile({ type: 'asset', fileName: xmlFileName, source: xmlText })
         const portraits: Record<string, string> = {}
@@ -86,6 +119,7 @@ function bundledRpgAssets(includePackages: boolean, sourceDirectory: string) {
         packages.push({
           key: `file:${fileName}`,
           fileName,
+          formatVersion: 1,
           title: decodeXmlAttribute(xmlText.match(/<rpgbox\b[^>]*\btitle="([^"]*)"/u)?.[1] ?? fileName.replace(/\.rpgbox$/iu, '')),
           hasNsfw: /<section\s+name="nsfw"\s/u.test(xmlText),
           xmlUrl: `./${xmlFileName}`,

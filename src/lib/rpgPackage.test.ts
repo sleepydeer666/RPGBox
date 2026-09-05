@@ -120,6 +120,22 @@ describe('RPGBox XML manifest', () => {
     expect(filesystemMocks.readFile).not.toHaveBeenCalled()
   })
 
+  it('imports V2 settings and runtime state from segmented package files', async () => {
+    const zip = new JSZip()
+    zip.file('manifest.json', JSON.stringify({ format: 'rpgbox', version: 2, title: 'V2 RPG', sections: { settings: true, characters: false } }))
+    zip.file('settings.json', JSON.stringify({ storyStylePrompt: '新版分段设置' }))
+    zip.file('runtime-state.json', JSON.stringify({ gameState: { contentMode: 'normal', location: '新版地点', time: '', values: {}, presentCharacterIds: [] } }))
+    zip.file('chat/recent.json', JSON.stringify({ turns: [{ messages: [{ id: 'u1', role: 'user', content: '继续', createdAt: 1 }] }] }))
+    zip.file('chat/chapter-index.json', JSON.stringify({ recentTurnCount: 1, chapters: [] }))
+    const file = new File([await zip.generateAsync({ type: 'uint8array' })], 'segmented.rpgbox')
+
+    const imported = await importRpgbox(file, createBlankGame(1))
+
+    expect(imported.storyStylePrompt).toBe('新版分段设置')
+    expect(imported.gameState.location).toBe('新版地点')
+    expect(imported.messages).toHaveLength(1)
+  })
+
   it('imports NSFW settings without a separate enable flag', async () => {
     const zip = new JSZip()
     zip.file('rpg.xml', createRpgboxXml('NSFW RPG', {

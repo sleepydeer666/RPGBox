@@ -43,7 +43,7 @@ export interface PackageSections {
   nsfw?: { nsfwScenePrompt: string; characterSettings?: SerializedCharacterNsfwSettings[] }
 }
 
-interface RpgboxV2Manifest {
+export interface RpgboxV2Manifest {
   format: 'rpgbox'
   version: 2
   title: string
@@ -143,7 +143,15 @@ export async function importRpgbox(source: RpgboxImportSource, baseGame: GameSes
     if (v2Manifest) {
       const manifest = JSON.parse(await v2Manifest.getData(new TextWriter())) as RpgboxV2Manifest
       if (manifest.format !== 'rpgbox' || manifest.version !== 2) throw new Error('不支持的 RPGBox 文件版本')
-      return importRpgboxV2(files, manifest, baseGame, options)
+      return importRpgboxV2(manifest, baseGame, options, async (path) => {
+        const file = files.get(path)
+        return file ? file.getData(new TextWriter()) : undefined
+      }, async (characterId, assetPath) => {
+        const asset = files.get(assetPath)
+        if (!asset) return undefined
+        const blob = await asset.getData(new BlobWriter())
+        return savePortraitFile(baseGame.id, characterId, new File([blob], assetPath.split('/').at(-1) ?? 'portrait.png'))
+      })
     }
     const xmlFile = files.get('rpg.xml')
     if (!xmlFile || xmlFile.directory) throw new Error('RPGBox 文件缺少 rpg.xml')
@@ -182,11 +190,14 @@ async function serializeCharacters(game: GameSession, zip: JSZip, onPortraitProg
   return characters
 }
 
-async function importRpgboxV2(files: Map<string, any>, manifest: RpgboxV2Manifest, baseGame: GameSession, options: RpgboxImportOptions): Promise<GameSession> {
-  const readText = async (path: string) => {
-    const file = files.get(path)
-    return file ? file.getData(new TextWriter()) : undefined
-  }
+export async function importRpgboxV2(
+  manifest: RpgboxV2Manifest,
+  baseGame: GameSession,
+  options: RpgboxImportOptions,
+  readText: (path: string) => Promise<string | undefined>,
+  importPortrait: (characterId: string, assetPath: string) => Promise<string | undefined>,
+): Promise<GameSession> {
+  if (manifest.format !== 'rpgbox' || manifest.version !== 2) throw new Error('不支持的 RPGBox 文件版本')
   let game: GameSession = { ...baseGame }
   if (manifest.sections.settings) {
     const settingsText = await readText('settings.json')
@@ -208,15 +219,10 @@ async function importRpgboxV2(files: Map<string, any>, manifest: RpgboxV2Manifes
     game = { ...game, ...importSettings(settings), ...runtime, messages }
   }
   if (manifest.sections.characters) {
-    const charactersFile = files.get('characters.json')
-    if (!charactersFile) throw new Error('RPGBox 文件缺少角色数据')
-    const characters = JSON.parse(await charactersFile.getData(new TextWriter())) as SerializedCharacter[]
-    game = await importRpgboxSections({ characters }, game, options, async (characterId, assetPath) => {
-      const asset = files.get(assetPath)
-      if (!asset) return undefined
-      const blob = await asset.getData(new BlobWriter())
-      return savePortraitFile(baseGame.id, characterId, new File([blob], assetPath.split('/').at(-1) ?? 'portrait.png'))
-    })
+    const charactersText = await readText('characters.json')
+    if (!charactersText) throw new Error('RPGBox 文件缺少角色数据')
+    const characters = JSON.parse(charactersText) as SerializedCharacter[]
+    game = await importRpgboxSections({ characters }, game, options, importPortrait)
   }
   return normalizeGameNarrativeModes({ ...game, id: baseGame.id, updatedAt: Date.now(), rollbackLog: (game.rollbackLog ?? []).slice(-5) })
 }
