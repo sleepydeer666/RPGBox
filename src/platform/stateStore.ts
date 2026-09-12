@@ -106,6 +106,39 @@ export async function writeLocalFlag(key: string): Promise<void> {
   await writeStoredState(key, 'true')
 }
 
+/** Returns whether the pre-1.3 RPG state or portrait directory is still present. */
+export async function hasLegacyStorage(): Promise<boolean> {
+  if (!isAndroidRuntime()) return false
+  const { value } = await Preferences.get({ key: 'rpgbox-state-v1' })
+  if (value) return true
+  for (const legacyPath of ['portraits', 'rpgbox-v2/migration/legacy-v1-backup.json']) {
+    try {
+      if (legacyPath === 'portraits') await Filesystem.readdir({ path: legacyPath, directory: Directory.Data })
+      else await Filesystem.readFile({ path: legacyPath, directory: Directory.Data })
+      return true
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error
+    }
+  }
+  return false
+}
+
+/** Removes only storage owned by the pre-1.3 layout; v2 RPG data is untouched. */
+export async function clearLegacyStorage(): Promise<void> {
+  if (!isAndroidRuntime()) return
+  try {
+    await Filesystem.rmdir({ path: 'portraits', directory: Directory.Data, recursive: true })
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error
+  }
+  await Preferences.remove({ key: 'rpgbox-state-v1' })
+  try {
+    await Filesystem.deleteFile({ path: 'rpgbox-v2/migration/legacy-v1-backup.json', directory: Directory.Data })
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error
+  }
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION)

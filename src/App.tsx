@@ -32,7 +32,7 @@ import { selectTurnPortraitCharacters } from './lib/turnPortraits'
 import { streamCompletion } from './services/openai'
 import type { CompletionUsage } from './services/openai'
 import { createInitialProviderState, loadState, saveState } from './storage'
-import { readLocalFlag, writeLocalFlag } from './platform/stateStore'
+import { clearLegacyStorage, hasLegacyStorage, readLocalFlag, writeLocalFlag } from './platform/stateStore'
 import { listStoredChapters, readStoredChapter, type StoredChapterSummary } from './platform/rpgFileStore'
 import type { ChapterMemory, CharacterProfile, ChatMessage, Choice, DebugPromptSegment, GameSession, MemoryState, MemorySummaryDebugEntry, PortraitGroup, ProviderProfile, StorySegment } from './types'
 
@@ -312,6 +312,12 @@ function App() {
       })))
       setHydrated(true)
       void readLocalFlag(ONBOARDING_PROMPT_SEEN_KEY).then(setOnboardingPromptSeen)
+      void hasLegacyStorage().then((hasLegacy) => {
+        if (!hasLegacy) return
+        const confirmed = window.confirm('检测到旧版本遗留数据（主要是旧版立绘文件）。清理这些数据可以节约本地存储空间，且不会影响现有 RPG。是否立即清理？')
+        if (!confirmed) return
+        void clearLegacyStorage().catch((cleanupError) => setError(`旧版本数据清理失败：${toErrorMessage(cleanupError)}`))
+      }).catch((checkError) => setError(`检查旧版本数据失败：${toErrorMessage(checkError)}`))
     })
   }, [])
 

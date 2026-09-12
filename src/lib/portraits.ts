@@ -24,8 +24,8 @@ export async function deletePortraitFile(uri: string): Promise<void> {
   if (!isAndroidRuntime() || uri.startsWith('data:') || uri.startsWith('blob:')) return
   try {
     await Filesystem.deleteFile({ path: uri })
-  } catch {
-    // Missing files should not prevent removing stale portrait metadata.
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error
   }
 }
 
@@ -96,4 +96,8 @@ function mimeType(extension: string): string {
   if (extension === 'webp') return 'image/webp'
   if (extension === 'gif') return 'image/gif'
   return 'image/png'
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return /not found|does not exist|no such file|不存在/iu.test(error instanceof Error ? error.message : String(error))
 }

@@ -4439,7 +4439,11 @@ textarea:focus-visible {
 
 .character-experience-summary-modal {
   width: min(520px, 100%);
-  max-height: min(680px, 88vh);
+  height: min(680px, calc(100vh - 48px));
+  height: min(680px, calc(100dvh - 48px));
+  max-height: 88vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .character-experience-summary-content {
@@ -5163,6 +5167,16 @@ textarea:focus-visible {
     max-height: 94vh;
     border-radius: 7px 7px 0 0;
     border-bottom: 0;
+  }
+
+  .character-experience-summary-modal {
+    height: min(680px, 94vh);
+    height: min(680px, 94dvh);
+    max-height: 94vh;
+  }
+
+  .character-experience-summary-modal .modal-footer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
   .memory-modal {

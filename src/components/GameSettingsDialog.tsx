@@ -371,8 +371,10 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
     onChange(removeNarrativeMode(game, modeId))
   }
 
-  function removeCharacter(character: CharacterProfile) {
+  async function removeCharacter(character: CharacterProfile) {
     if (character.role === 'player') return
+    const portraitUris = Array.from(new Set(character.portraits.map((portrait) => portrait.uri)))
+    await Promise.all(portraitUris.map((uri) => deletePortraitFile(uri)))
     patchGame({ characters: game.characters.filter((item) => item.id !== character.id) })
   }
 
@@ -446,7 +448,7 @@ export default function GameSettingsDialog({ game, games, providers, fullSystemP
             </aside>
             {selectedCharacter && <div className="character-editor">
               <div className="character-common-settings">
-                <div className="character-editor-head"><div><span className="eyebrow">通用设定</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
+                <div className="character-editor-head"><div><span className="eyebrow">通用设定</span><h3>{selectedCharacter.name || '未命名角色'}</h3></div><div className="character-editor-actions"><button className="secondary-icon" disabled={selectedCharacter.role === 'player'} onClick={() => { setExportCharacter(selectedCharacter); setRoleNotice('') }} title={selectedCharacter.role === 'player' ? '主角不能导出为 NPC' : '导出 NPC'}><Download size={17} /></button><button className="danger-icon" disabled={selectedCharacter.role === 'player'} onClick={() => void removeCharacter(selectedCharacter)} title={selectedCharacter.role === 'player' ? '主角不能删除' : '删除角色'}><Trash2 size={17} /></button></div></div>
                 <div className="form-row"><label>姓名<DeferredInput key={`${selectedCharacter.id}:name`} value={selectedCharacter.name} onCommit={(name) => patchCharacter(selectedCharacter.id, { name })} /></label><label>身份<select value={selectedCharacter.role} onChange={(event) => patchCharacter(selectedCharacter.id, { role: event.target.value as CharacterProfile['role'] })}><option value="player">用户扮演的主角</option><option value="npc">NPC</option></select></label></div>
                 <div className="form-row"><label>性别<DeferredInput key={`${selectedCharacter.id}:gender`} value={selectedCharacter.gender} onCommit={(gender) => patchCharacter(selectedCharacter.id, { gender })} placeholder="可自定义" /></label><label>主体颜色<CharacterColorControl key={selectedCharacter.id} value={selectedCharacter.color} onChange={(color) => patchCharacter(selectedCharacter.id, { color })} /></label></div>
                 <label>人物设定<span className="field-description">描述人物的基本设定、外观特征、性格、背景、人际关系等</span><DeferredTextarea key={`${selectedCharacter.id}:description`} className="character-description" value={selectedCharacter.description} onCommit={(description) => patchCharacter(selectedCharacter.id, { description })} placeholder="填写人物的基础资料与角色设定" /></label>
